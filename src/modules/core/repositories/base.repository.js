@@ -1,7 +1,7 @@
 import { Types } from "mongoose";
 import { AuditRepository } from "./audit.repository.js";
 
-export class GenericRepository {
+export class BaseRepository {
   constructor(model) {
     this.model = model;
     this.modelName = model.modelName;
