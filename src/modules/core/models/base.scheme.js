@@ -201,9 +201,9 @@ export const addCommonMethods = (schema) => {
   };
 
   // Método para verificar si el documento está activo
-  schema.methods.isActive = function () {
+  /*schema.methods.isActive = function () {
     return !this.isDeleted;
-  };
+  };*/
 
   // Método para agregar razón de cambio
   schema.methods.addChangeReason = function (reason) {

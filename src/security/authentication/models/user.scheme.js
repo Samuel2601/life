@@ -61,6 +61,12 @@ const UserProfileSchema = new mongoose.Schema(
       type: String,
       validate: CommonValidators.url,
     },
+    // Estado de registro
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
   },
   { _id: false }
 );
