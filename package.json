@@ -1,12 +1,139 @@
 {
-  "name": "life",
+  "name": "life-business-platform",
   "version": "1.0.0",
+  "description": "Plataforma de geolocalización de empresas con sistema multiidioma y autenticación avanzada",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "dev:debug": "nodemon --inspect index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint src/**/*.js --fix",
+    "format": "prettier --write src/**/*.js",
+    "build": "node scripts/build.js",
+    "db:seed": "node scripts/seed-database.js",
+    "db:migrate": "node scripts/migrate.js",
+    "security:audit": "npm audit",
+    "security:fix": "npm audit fix",
+    "docker:build": "docker build -t life .",
+    "docker:run": "docker run -p 3000:3000 life",
+    "docs:generate": "jsdoc -c jsdoc.conf.json",
+    "health:check": "node scripts/health-check.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "keywords": [
+    "business",
+    "geolocation",
+    "multilingual",
+    "authentication",
+    "mongodb",
+    "nodejs",
+    "api",
+    "platform"
+  ],
+  "author": {
+    "name": "Samuel Arévalo",
+    "email": "saamare99@gmail.com",
+    "url": "https://github.com/Samuel2601"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Samuel2601/life.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tu-Samuel2601/life/issues"
+  },
+  "homepage": "https://github.com/Samuel2601/life#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.5.0",
+    "bcrypt": "^5.1.0",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.10.0",
+    "express-validator": "^7.0.1",
+    "geolib": "^3.3.4",
+    "helmet": "^7.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "moment-timezone": "^0.5.43",
+    "mongoose": "^7.5.0",
+    "mongoose-paginate-v2": "^1.9.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.2",
+    "openai": "^3.3.0",
+    "redis": "^4.6.7",
+    "sharp": "^0.32.4",
+    "user-agents": "^1.0.1374",
+    "uuid": "^9.0.0",
+    "validator": "^13.11.0",
+    "winston": "^3.10.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.47.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-security": "^1.7.1",
+    "husky": "^8.0.3",
+    "jest": "^29.6.2",
+    "jsdoc": "^4.0.2",
+    "lint-staged": "^13.2.3",
+    "mongodb-memory-server": "^8.15.1",
+    "nodemon": "^3.0.1",
+    "prettier": "^3.0.2",
+    "supertest": "^6.3.3"
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "pre-push": "npm test"
+    }
+  },
+  "lint-staged": {
+    "src/**/*.js": [
+      "eslint --fix",
+      "prettier --write",
+      "git add"
+    ]
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/config/*.js",
+      "!src/**/*.test.js"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": [
+      "text",
+      "lcov",
+      "html"
+    ]
+  },
+  "nodemonConfig": {
+    "watch": [
+      "src"
+    ],
+    "ext": "js,json",
+    "ignore": [
+      "src/**/*.test.js",
+      "node_modules",
+      "coverage"
+    ],
+    "env": {
+      "NODE_ENV": "development"
+    }
+  }
 }

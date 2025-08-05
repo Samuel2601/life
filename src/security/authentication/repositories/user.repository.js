@@ -4,10 +4,9 @@
 import { Types } from "mongoose";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { BaseRepository } from "../../core/repositories/base.repository.js";
 import { User } from "../models/user.scheme.js";
-import { AuditRepository } from "../../security/audit/repositories/audit.repository.js";
 import { TransactionHelper } from "../../../utils/transsaccion.helper.js";
+import { BaseRepository } from "../../../modules/core/repositories/base.repository.js";
 
 export class UserRepository extends BaseRepository {
   constructor() {

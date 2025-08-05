@@ -5,8 +5,7 @@ import mongoose from "mongoose";
 import {
   BaseSchemeFields,
   setupBaseSchema,
-  CommonValidators,
-} from "../../core/models/base.scheme.js";
+} from "../../../modules/core/models/base.scheme.js";
 
 /**
  * Schema para permisos específicos
@@ -130,12 +129,6 @@ const RoleSchema = new mongoose.Schema({
   isSystemRole: {
     type: Boolean,
     default: false,
-    index: true,
-  },
-
-  isActive: {
-    type: Boolean,
-    default: true,
     index: true,
   },
 

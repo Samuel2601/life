@@ -3,9 +3,9 @@
 // =============================================================================
 import { Types } from "mongoose";
 import crypto from "crypto";
-import { BaseRepository } from "../../core/repositories/base.repository.js";
 import { UserSession } from "../models/user_session.scheme.js";
 import { TransactionHelper } from "../../../utils/transsaccion.helper.js";
+import { BaseRepository } from "../../../modules/core/repositories/base.repository.js";
 
 export class UserSessionRepository extends BaseRepository {
   constructor() {

@@ -2,7 +2,7 @@
 // src/modules/authentication/repositories/role.repository.js
 // =============================================================================
 import { Types } from "mongoose";
-import { BaseRepository } from "../../core/repositories/base.repository.js";
+import { BaseRepository } from "../../../modules/core/repositories/base.repository.js";
 import { Role } from "../models/role.scheme.js";
 import { TransactionHelper } from "../../../utils/transsaccion.helper.js";
 

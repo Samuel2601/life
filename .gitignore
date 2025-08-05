@@ -2,3 +2,6 @@
 /dist
 /build
 /.env
+
+package-lock.json
+yarn.lock

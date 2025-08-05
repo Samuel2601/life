@@ -1,8 +1,8 @@
 import mongoose, { Types } from "mongoose";
 import mongoosePaginate from "mongoose-paginate-v2";
-import { Audit } from "../../models/AuditSchema.js";
+import { AuditLog } from "../models/audit_log.scheme.js";
 
-Audit.schema.plugin(mongoosePaginate);
+AuditLog.schema.plugin(mongoosePaginate);
 
 // Helper para detectar cambios entre documentos
 function detectChanges(
@@ -131,7 +131,7 @@ export const AuditRepository = {
       throw new Error("ID del documento no válido");
     }
 
-    const audit = new Audit({
+    const audit = new AuditLog({
       schema,
       documentId: new Types.ObjectId(documentId),
       method,
@@ -179,7 +179,7 @@ export const AuditRepository = {
   async getDocumentHistory(documentId, schema, options = {}) {
     const { page = 1, limit = 10, sort = "-createdAt" } = options;
 
-    return await Audit.paginate(
+    return await AuditLog.paginate(
       {
         documentId: new Types.ObjectId(documentId),
         schema,
@@ -206,7 +206,7 @@ export const AuditRepository = {
       throw new Error("ID de auditoría no válido");
     }
 
-    return await Audit.findById(auditId)
+    return await AuditLog.findById(auditId)
       .populate("userData.userId", "name email")
       .lean();
   },
@@ -237,7 +237,7 @@ export const AuditRepository = {
       if (dateTo) query.createdAt.$lte = new Date(dateTo);
     }
 
-    return await Audit.paginate(query, {
+    return await AuditLog.paginate(query, {
       page,
       limit,
       sort,
@@ -277,9 +277,9 @@ export const AuditRepository = {
       },
     ];
 
-    const stats = await Audit.aggregate(pipeline);
+    const stats = await AuditLog.aggregate(pipeline);
 
-    const totalActions = await Audit.countDocuments(query);
+    const totalActions = await AuditLog.countDocuments(query);
 
     return {
       totalActions,
@@ -326,7 +326,7 @@ export const AuditRepository = {
       query.method = "update"; // Solo eliminar respaldos de actualizaciones
     }
 
-    const result = await Audit.deleteMany(query);
+    const result = await AuditLog.deleteMany(query);
 
     return {
       deletedCount: result.deletedCount,

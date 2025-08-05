@@ -7,11 +7,11 @@ import {
   BaseSchemeFields,
   setupBaseSchema,
   CommonValidators,
-} from "../../core/models/base.scheme.js";
+} from "../../../modules/core/models/base.scheme.js";
 import {
   SUPPORTED_LANGUAGES,
   DEFAULT_LANGUAGE,
-} from "../../core/models/multi_language_pattern.scheme.js";
+} from "../../../modules/core/models/multi_language_pattern.scheme.js";
 
 /**
  * Schema de perfil de usuario
@@ -145,13 +145,6 @@ const UserSchema = new mongoose.Schema({
       index: true,
     },
   ],
-
-  // Estado de cuenta
-  isActive: {
-    type: Boolean,
-    default: true,
-    index: true,
-  },
 
   isEmailVerified: {
     type: Boolean,

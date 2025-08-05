@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import {
   BaseSchemeFields,
   addTimestampMiddleware,
-} from "../base/BaseSchema.js";
+} from "../../../modules/core/models/base.scheme.js";
 
 // Schema para información del dispositivo
 const DeviceInfoSchema = new mongoose.Schema(

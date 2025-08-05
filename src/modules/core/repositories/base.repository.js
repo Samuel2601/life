@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { AuditRepository } from "./audit.repository.js";
+import { AuditRepository } from "../../../security/audit/repositories/audit.repository.js";
 
 export class BaseRepository {
   constructor(model) {
