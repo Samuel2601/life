@@ -1,14 +1,16 @@
 // =============================================================================
-// src/modules/authentication/models/role.scheme.js
+// src/modules/authentication/models/role.scheme.js - VERSIÓN OPTIMIZADA
+// Mantiene la simplicidad del primer esquema + mejoras selectivas del segundo
 // =============================================================================
 import mongoose from "mongoose";
 import {
   BaseSchemeFields,
   setupBaseSchema,
 } from "../../../modules/core/models/base.scheme.js";
+import { createMultiLanguageField } from "../../../modules/core/models/multi_language_pattern.scheme.js";
 
 /**
- * Schema para permisos específicos
+ * Schema para permisos específicos embebidos (optimizado)
  */
 const PermissionSchema = new mongoose.Schema(
   {
@@ -30,6 +32,7 @@ const PermissionSchema = new mongoose.Schema(
         "media",
         "notifications",
         "analytics",
+        "all", // Para super admins
       ],
       index: true,
     },
@@ -51,25 +54,49 @@ const PermissionSchema = new mongoose.Schema(
           "import",
           "restore",
           "archive",
+          "moderate",
+          "verify",
+          "all", // Para permisos globales
         ],
       },
     ],
+    scope: {
+      type: String,
+      enum: ["none", "own", "company", "global"],
+      default: "own",
+      index: true,
+    },
+    // Condiciones específicas (JSON flexible)
     conditions: {
-      // Condiciones adicionales para el permiso (opcional)
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
-    scope: {
-      type: String,
-      enum: ["global", "company", "own", "none"],
-      default: "own",
+    // Restricciones geográficas básicas (del segundo esquema)
+    geographicRestrictions: {
+      allowedCountries: [String], // ISO codes
+      allowedRegions: [String],
+      restrictToLocation: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    // Restricciones de horario (simplificadas)
+    timeRestrictions: {
+      businessHoursOnly: {
+        type: Boolean,
+        default: false,
+      },
+      timezone: {
+        type: String,
+        default: "America/Lima",
+      },
     },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de Rol
+ * Schema principal de Rol (optimizado)
  */
 const RoleSchema = new mongoose.Schema({
   // Información básica del rol
@@ -85,30 +112,31 @@ const RoleSchema = new mongoose.Schema({
       /^[a-z0-9_-]+$/,
       "El nombre del rol solo puede contener letras minúsculas, números, guiones y guiones bajos",
     ],
+    index: true,
   },
 
-  displayName: {
-    type: String,
-    required: [true, "El nombre para mostrar es requerido"],
-    trim: true,
-    maxlength: [100, "El nombre para mostrar no puede exceder 100 caracteres"],
-  },
+  // Nombre para mostrar (NUEVO: multiidioma para UI)
+  displayName: createMultiLanguageField(true),
 
-  description: {
-    type: String,
-    maxlength: [500, "La descripción no puede exceder 500 caracteres"],
-    trim: true,
-  },
+  // Descripción (NUEVO: multiidioma para documentación)
+  description: createMultiLanguageField(false),
 
-  // Permisos del rol
+  // Permisos del rol (mantener embebidos para rendimiento)
   permissions: [PermissionSchema],
 
-  // Jerarquía de roles
+  // Jerarquía y tipo de rol
   hierarchy: {
     type: Number,
     default: 0,
     min: [0, "La jerarquía no puede ser negativa"],
     max: [100, "La jerarquía no puede exceder 100"],
+    index: true,
+  },
+
+  roleType: {
+    type: String,
+    enum: ["system", "business", "customer", "moderator", "custom"],
+    default: "custom",
     index: true,
   },
 
@@ -118,7 +146,6 @@ const RoleSchema = new mongoose.Schema({
     default: null,
     validate: {
       validator: function (v) {
-        // No puede ser su propio padre
         return !v || !this._id || !v.equals(this._id);
       },
       message: "Un rol no puede ser su propio padre",
@@ -141,7 +168,7 @@ const RoleSchema = new mongoose.Schema({
   // Limitaciones del rol
   maxUsers: {
     type: Number,
-    default: null, // Sin límite
+    default: null,
     min: [0, "El máximo de usuarios no puede ser negativo"],
   },
 
@@ -151,7 +178,7 @@ const RoleSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Restricciones específicas de empresa
+  // Restricciones específicas de empresa (mejoradas)
   companyRestrictions: {
     canManageAllCompanies: {
       type: Boolean,
@@ -172,9 +199,12 @@ const RoleSchema = new mongoose.Schema({
       default: 1,
       min: [0, "El máximo de empresas no puede ser negativo"],
     },
+    // NUEVO: restricciones por categoría de empresa
+    allowedBusinessCategories: [String],
+    excludedBusinessCategories: [String],
   },
 
-  // Restricciones geográficas
+  // Restricciones geográficas (simplificadas)
   geographicRestrictions: {
     allowedCountries: [
       {
@@ -183,19 +213,38 @@ const RoleSchema = new mongoose.Schema({
         length: 2,
       },
     ],
-    allowedRegions: [
-      {
-        type: String,
-        trim: true,
-      },
-    ],
+    allowedRegions: [String],
     restrictToGeolocation: {
       type: Boolean,
       default: false,
     },
   },
 
-  // Metadatos del rol
+  // NUEVO: Configuración de sesión específica por rol
+  sessionConfig: {
+    maxConcurrentSessions: {
+      type: Number,
+      default: 3,
+      min: 1,
+      max: 10,
+    },
+    sessionTimeoutMinutes: {
+      type: Number,
+      default: 480, // 8 horas
+      min: 15,
+      max: 43200, // 30 días
+    },
+    requireTwoFactor: {
+      type: Boolean,
+      default: false,
+    },
+    allowRememberMe: {
+      type: Boolean,
+      default: true,
+    },
+  },
+
+  // Metadatos del rol (expandidos)
   metadata: {
     color: {
       type: String,
@@ -222,9 +271,15 @@ const RoleSchema = new mongoose.Schema({
       min: 0,
       max: 10,
     },
+    // NUEVO: metadatos para UI
+    badgeText: String,
+    sortOrder: {
+      type: Number,
+      default: 0,
+    },
   },
 
-  // Estadísticas del rol
+  // Estadísticas del rol (mejoradas)
   stats: {
     userCount: {
       type: Number,
@@ -239,6 +294,36 @@ const RoleSchema = new mongoose.Schema({
       default: 0,
       min: 0,
     },
+    // NUEVO: estadísticas de uso
+    avgSessionDuration: {
+      type: Number,
+      default: 0,
+    },
+    lastUsed: {
+      type: Date,
+    },
+  },
+
+  // NUEVO: Configuración de notificaciones por rol
+  notificationSettings: {
+    enableSystemNotifications: {
+      type: Boolean,
+      default: true,
+    },
+    enableBusinessNotifications: {
+      type: Boolean,
+      default: true,
+    },
+    notificationChannels: [
+      {
+        type: String,
+        enum: ["email", "sms", "push", "in_app"],
+      },
+    ],
+    dailyDigest: {
+      type: Boolean,
+      default: false,
+    },
   },
 
   // Campos base (auditoría, soft delete, etc.)
@@ -247,73 +332,88 @@ const RoleSchema = new mongoose.Schema({
 
 // Configurar el esquema con funcionalidades base
 setupBaseSchema(RoleSchema, {
-  addBaseFields: false, // Ya los agregamos manualmente arriba
+  addBaseFields: false,
 });
 
 // ================================
-// ÍNDICES ESPECÍFICOS
+// ÍNDICES ESPECÍFICOS (optimizados)
 // ================================
 
 // Índices únicos
 RoleSchema.index({ roleName: 1 }, { unique: true });
 
-// Índices compuestos
+// Índices compuestos para consultas frecuentes
 RoleSchema.index({ hierarchy: 1, isActive: 1 });
 RoleSchema.index({ isActive: 1, isSystemRole: 1 });
-RoleSchema.index({ "metadata.category": 1, isActive: 1 });
+RoleSchema.index({
+  "metadata.category": 1,
+  isActive: 1,
+  "metadata.sortOrder": 1,
+});
 RoleSchema.index({ parentRole: 1, hierarchy: 1 });
+RoleSchema.index({ roleType: 1, isActive: 1 });
 
 // TTL index para roles con expiración
 RoleSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// Índices para restricciones
+RoleSchema.index({ "companyRestrictions.allowedCompanies": 1 });
+RoleSchema.index({ "geographicRestrictions.allowedCountries": 1 });
+
 // ================================
-// VIRTUALS
+// VIRTUALS (mejorados)
 // ================================
 
-// Virtual para verificar si el rol está expirado
 RoleSchema.virtual("isExpired").get(function () {
   return this.expiresAt && this.expiresAt < new Date();
 });
 
-// Virtual para verificar si puede asignar más usuarios
 RoleSchema.virtual("canAssignMoreUsers").get(function () {
   if (!this.maxUsers) return true;
   return this.stats.userCount < this.maxUsers;
 });
 
-// Virtual para obtener el porcentaje de uso
 RoleSchema.virtual("usagePercentage").get(function () {
   if (!this.maxUsers) return 0;
   return Math.round((this.stats.userCount / this.maxUsers) * 100);
 });
 
+// NUEVO: Virtual para obtener nivel de seguridad
+RoleSchema.virtual("securityLevel").get(function () {
+  if (this.hierarchy >= 90) return "critical";
+  if (this.hierarchy >= 70) return "high";
+  if (this.hierarchy >= 40) return "medium";
+  return "standard";
+});
+
 // ================================
-// MÉTODOS DE INSTANCIA
+// MÉTODOS DE INSTANCIA (optimizados)
 // ================================
 
-// Método para verificar si tiene un permiso específico
+// Método principal para verificar permisos (mantener compatibilidad)
 RoleSchema.methods.hasPermission = function (resource, action, scope = "own") {
   if (!this.isActive || this.isExpired) {
     return false;
   }
 
-  // Buscar el permiso para el recurso
-  const permission = this.permissions.find((p) => p.resource === resource);
+  const permission = this.permissions.find(
+    (p) => p.resource === resource || p.resource === "all"
+  );
 
   if (!permission) {
     return false;
   }
 
-  // Verificar si tiene la acción específica o 'manage'
   const hasAction =
     permission.actions.includes(action) ||
-    permission.actions.includes("manage");
+    permission.actions.includes("manage") ||
+    permission.actions.includes("all");
 
   if (!hasAction) {
     return false;
   }
 
-  // Verificar el alcance
+  // Verificar scope
   const scopeHierarchy = ["none", "own", "company", "global"];
   const requiredScopeLevel = scopeHierarchy.indexOf(scope);
   const permissionScopeLevel = scopeHierarchy.indexOf(permission.scope);
@@ -321,14 +421,49 @@ RoleSchema.methods.hasPermission = function (resource, action, scope = "own") {
   return permissionScopeLevel >= requiredScopeLevel;
 };
 
-// Método para agregar permiso
+// NUEVO: Método para verificar permisos con contexto geográfico
+RoleSchema.methods.hasPermissionWithLocation = function (
+  resource,
+  action,
+  scope = "own",
+  location = null
+) {
+  if (!this.hasPermission(resource, action, scope)) {
+    return false;
+  }
+
+  // Verificar restricciones geográficas globales del rol
+  if (this.geographicRestrictions.restrictToGeolocation && location) {
+    return this.checkGeographicRestrictions(location.country, location.region);
+  }
+
+  // Verificar restricciones específicas del permiso
+  const permission = this.permissions.find(
+    (p) => p.resource === resource || p.resource === "all"
+  );
+
+  if (permission?.geographicRestrictions?.restrictToLocation && location) {
+    const restrictions = permission.geographicRestrictions;
+
+    if (restrictions.allowedCountries?.length > 0) {
+      return restrictions.allowedCountries.includes(location.country);
+    }
+
+    if (restrictions.allowedRegions?.length > 0) {
+      return restrictions.allowedRegions.includes(location.region);
+    }
+  }
+
+  return true;
+};
+
+// Mantener métodos existentes para compatibilidad
 RoleSchema.methods.addPermission = function (
   resource,
   actions,
   scope = "own",
   conditions = {}
 ) {
-  // Verificar si ya existe permiso para este recurso
   const existingPermissionIndex = this.permissions.findIndex(
     (p) => p.resource === resource
   );
@@ -338,27 +473,28 @@ RoleSchema.methods.addPermission = function (
     actions: Array.isArray(actions) ? actions : [actions],
     scope,
     conditions,
+    geographicRestrictions: {
+      restrictToLocation: false,
+    },
+    timeRestrictions: {
+      businessHoursOnly: false,
+    },
   };
 
   if (existingPermissionIndex >= 0) {
-    // Actualizar permiso existente
     this.permissions[existingPermissionIndex] = permission;
   } else {
-    // Agregar nuevo permiso
     this.permissions.push(permission);
   }
 
   return this;
 };
 
-// Método para remover permiso
 RoleSchema.methods.removePermission = function (resource, action = null) {
   if (action) {
-    // Remover acción específica
     const permission = this.permissions.find((p) => p.resource === resource);
     if (permission) {
       permission.actions = permission.actions.filter((a) => a !== action);
-      // Si no quedan acciones, remover el permiso completo
       if (permission.actions.length === 0) {
         this.permissions = this.permissions.filter(
           (p) => p.resource !== resource
@@ -366,20 +502,17 @@ RoleSchema.methods.removePermission = function (resource, action = null) {
       }
     }
   } else {
-    // Remover todo el permiso para el recurso
     this.permissions = this.permissions.filter((p) => p.resource !== resource);
   }
 
   return this;
 };
 
-// Método para verificar si puede gestionar empresa
 RoleSchema.methods.canManageCompany = function (companyId = null) {
   if (!this.isActive || this.isExpired) {
     return false;
   }
 
-  // Verificar restricciones de empresa
   const restrictions = this.companyRestrictions;
 
   if (restrictions.canManageAllCompanies) {
@@ -397,7 +530,6 @@ RoleSchema.methods.canManageCompany = function (companyId = null) {
   return !restrictions.restrictedToOwnCompany;
 };
 
-// Método para verificar restricciones geográficas
 RoleSchema.methods.checkGeographicRestrictions = function (
   country = null,
   region = null
@@ -408,7 +540,6 @@ RoleSchema.methods.checkGeographicRestrictions = function (
 
   const restrictions = this.geographicRestrictions;
 
-  // Verificar país
   if (
     country &&
     restrictions.allowedCountries &&
@@ -419,7 +550,6 @@ RoleSchema.methods.checkGeographicRestrictions = function (
     }
   }
 
-  // Verificar región
   if (
     region &&
     restrictions.allowedRegions &&
@@ -433,18 +563,54 @@ RoleSchema.methods.checkGeographicRestrictions = function (
   return true;
 };
 
-// Método para obtener resumen de permisos
+// NUEVO: Método para obtener configuración de sesión efectiva
+RoleSchema.methods.getEffectiveSessionConfig = function () {
+  const defaultConfig = {
+    maxConcurrentSessions: 3,
+    sessionTimeoutMinutes: 480,
+    requireTwoFactor: false,
+    allowRememberMe: true,
+  };
+
+  return {
+    ...defaultConfig,
+    ...this.sessionConfig,
+  };
+};
+
+// NUEVO: Método para verificar si requiere aprobación para acciones específicas
+RoleSchema.methods.requiresApprovalFor = function (resource, action) {
+  const permission = this.permissions.find(
+    (p) => p.resource === resource || p.resource === "all"
+  );
+
+  if (!permission) return false;
+
+  // Acciones que siempre requieren aprobación para ciertos roles
+  const criticalActions = ["delete", "manage", "admin"];
+  const requiresApprovalActions = permission.conditions?.requiresApproval || [];
+
+  return (
+    (criticalActions.includes(action) && this.hierarchy < 80) ||
+    requiresApprovalActions.includes(action)
+  );
+};
+
 RoleSchema.methods.getPermissionsSummary = function () {
   const summary = {
     totalPermissions: this.permissions.length,
     resourcesWithFullAccess: [],
     resourcesWithLimitedAccess: [],
     scopeDistribution: { none: 0, own: 0, company: 0, global: 0 },
+    securityLevel: this.securityLevel,
+    requiresTwoFactor: this.sessionConfig?.requireTwoFactor || false,
   };
 
   this.permissions.forEach((permission) => {
-    // Verificar si tiene acceso completo (manage)
-    if (permission.actions.includes("manage")) {
+    if (
+      permission.actions.includes("manage") ||
+      permission.actions.includes("all")
+    ) {
       summary.resourcesWithFullAccess.push(permission.resource);
     } else {
       summary.resourcesWithLimitedAccess.push({
@@ -453,7 +619,6 @@ RoleSchema.methods.getPermissionsSummary = function () {
       });
     }
 
-    // Contar distribución de alcances
     summary.scopeDistribution[permission.scope]++;
   });
 
@@ -461,10 +626,9 @@ RoleSchema.methods.getPermissionsSummary = function () {
 };
 
 // ================================
-// MÉTODOS ESTÁTICOS
+// MÉTODOS ESTÁTICOS (mantener compatibilidad)
 // ================================
 
-// Obtener rol por nombre
 RoleSchema.statics.findByName = function (roleName) {
   return this.findOne({
     roleName: roleName.toLowerCase(),
@@ -473,7 +637,6 @@ RoleSchema.statics.findByName = function (roleName) {
   });
 };
 
-// Obtener roles por jerarquía
 RoleSchema.statics.findByHierarchy = function (minLevel = 0, maxLevel = 100) {
   return this.find({
     hierarchy: { $gte: minLevel, $lte: maxLevel },
@@ -482,7 +645,6 @@ RoleSchema.statics.findByHierarchy = function (minLevel = 0, maxLevel = 100) {
   }).sort({ hierarchy: 1 });
 };
 
-// Obtener roles de sistema
 RoleSchema.statics.getSystemRoles = function () {
   return this.find({
     isSystemRole: true,
@@ -491,7 +653,6 @@ RoleSchema.statics.getSystemRoles = function () {
   }).sort({ hierarchy: 1 });
 };
 
-// Obtener rol por defecto
 RoleSchema.statics.getDefaultRole = function () {
   return this.findOne({
     isDefault: true,
@@ -500,71 +661,100 @@ RoleSchema.statics.getDefaultRole = function () {
   });
 };
 
-// Crear roles predeterminados del sistema
+// NUEVO: Método para obtener roles por tipo con paginación
+RoleSchema.statics.getRolesByType = function (roleType, options = {}) {
+  const query = {
+    roleType: roleType,
+    isActive: true,
+    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+  };
+
+  const queryObj = this.find(query);
+
+  if (options.populate) {
+    queryObj.populate(options.populate);
+  }
+
+  if (options.sortBy) {
+    const sort = {};
+    sort[options.sortBy] = options.sortOrder === "desc" ? -1 : 1;
+    queryObj.sort(sort);
+  } else {
+    queryObj.sort({ "metadata.sortOrder": 1, hierarchy: -1 });
+  }
+
+  if (options.limit) {
+    queryObj.limit(options.limit);
+  }
+
+  return queryObj;
+};
+
+// Actualizar método de creación de roles del sistema
 RoleSchema.statics.createSystemRoles = async function () {
   const systemRoles = [
     {
       roleName: "super_admin",
-      displayName: "Super Administrador",
-      description: "Acceso completo al sistema",
+      displayName: {
+        original: { language: "es", text: "Super Administrador" },
+        translations: new Map([
+          ["en", { text: "Super Administrator", translatedAt: new Date() }],
+        ]),
+      },
+      description: {
+        original: { language: "es", text: "Acceso completo al sistema" },
+        translations: new Map([
+          ["en", { text: "Complete system access", translatedAt: new Date() }],
+        ]),
+      },
       hierarchy: 100,
+      roleType: "system",
       isSystemRole: true,
-      permissions: [
-        { resource: "users", actions: ["manage"], scope: "global" },
-        { resource: "businesses", actions: ["manage"], scope: "global" },
-        { resource: "reviews", actions: ["manage"], scope: "global" },
-        { resource: "categories", actions: ["manage"], scope: "global" },
-        { resource: "roles", actions: ["manage"], scope: "global" },
-        { resource: "system", actions: ["manage"], scope: "global" },
-        { resource: "reports", actions: ["manage"], scope: "global" },
-        { resource: "audit", actions: ["manage"], scope: "global" },
-      ],
+      permissions: [{ resource: "all", actions: ["all"], scope: "global" }],
       companyRestrictions: {
         canManageAllCompanies: true,
         restrictedToOwnCompany: false,
+      },
+      sessionConfig: {
+        maxConcurrentSessions: 5,
+        sessionTimeoutMinutes: 720,
+        requireTwoFactor: true,
+        allowRememberMe: false,
       },
       metadata: {
         color: "#FF0000",
         icon: "crown",
         category: "admin",
         priority: 10,
-      },
-    },
-    {
-      roleName: "admin",
-      displayName: "Administrador",
-      description: "Administrador del sistema con acceso limitado",
-      hierarchy: 80,
-      isSystemRole: true,
-      permissions: [
-        {
-          resource: "users",
-          actions: ["create", "read", "update"],
-          scope: "global",
-        },
-        { resource: "businesses", actions: ["manage"], scope: "global" },
-        { resource: "reviews", actions: ["manage"], scope: "global" },
-        { resource: "categories", actions: ["manage"], scope: "global" },
-        { resource: "reports", actions: ["read", "export"], scope: "global" },
-      ],
-      companyRestrictions: {
-        canManageAllCompanies: true,
-        restrictedToOwnCompany: false,
-      },
-      metadata: {
-        color: "#FF6600",
-        icon: "shield",
-        category: "admin",
-        priority: 8,
+        sortOrder: 1,
       },
     },
     {
       roleName: "business_owner",
-      displayName: "Propietario de Empresa",
-      description: "Propietario que puede gestionar su empresa",
+      displayName: {
+        original: { language: "es", text: "Propietario de Empresa" },
+        translations: new Map([
+          ["en", { text: "Business Owner", translatedAt: new Date() }],
+        ]),
+      },
+      description: {
+        original: {
+          language: "es",
+          text: "Propietario que puede gestionar su empresa",
+        },
+        translations: new Map([
+          [
+            "en",
+            {
+              text: "Owner who can manage their business",
+              translatedAt: new Date(),
+            },
+          ],
+        ]),
+      },
       hierarchy: 50,
+      roleType: "business",
       isSystemRole: true,
-      isDefault: false,
       permissions: [
         { resource: "businesses", actions: ["read", "update"], scope: "own" },
         {
@@ -580,18 +770,45 @@ RoleSchema.statics.createSystemRoles = async function () {
         restrictedToOwnCompany: true,
         maxCompaniesManaged: 5,
       },
+      sessionConfig: {
+        maxConcurrentSessions: 3,
+        sessionTimeoutMinutes: 480,
+        requireTwoFactor: false,
+        allowRememberMe: true,
+      },
       metadata: {
         color: "#0066FF",
         icon: "building",
         category: "business",
         priority: 5,
+        sortOrder: 3,
       },
     },
     {
       roleName: "customer",
-      displayName: "Cliente",
-      description: "Usuario cliente con permisos básicos",
+      displayName: {
+        original: { language: "es", text: "Cliente" },
+        translations: new Map([
+          ["en", { text: "Customer", translatedAt: new Date() }],
+        ]),
+      },
+      description: {
+        original: {
+          language: "es",
+          text: "Usuario cliente con permisos básicos",
+        },
+        translations: new Map([
+          [
+            "en",
+            {
+              text: "Customer user with basic permissions",
+              translatedAt: new Date(),
+            },
+          ],
+        ]),
+      },
       hierarchy: 10,
+      roleType: "customer",
       isSystemRole: true,
       isDefault: true,
       permissions: [
@@ -608,11 +825,18 @@ RoleSchema.statics.createSystemRoles = async function () {
         restrictedToOwnCompany: true,
         maxCompaniesManaged: 0,
       },
+      sessionConfig: {
+        maxConcurrentSessions: 2,
+        sessionTimeoutMinutes: 240,
+        requireTwoFactor: false,
+        allowRememberMe: true,
+      },
       metadata: {
         color: "#00CC66",
         icon: "user",
         category: "customer",
         priority: 1,
+        sortOrder: 4,
       },
     },
   ];
@@ -627,7 +851,9 @@ RoleSchema.statics.createSystemRoles = async function () {
         const role = new this(roleData);
         await role.save();
         createdRoles.push(role);
-        console.log(`✅ Rol del sistema creado: ${roleData.displayName}`);
+        console.log(
+          `✅ Rol del sistema creado: ${roleData.displayName.original.text}`
+        );
       }
     } catch (error) {
       console.error(
@@ -640,7 +866,6 @@ RoleSchema.statics.createSystemRoles = async function () {
   return createdRoles;
 };
 
-// Actualizar estadísticas de rol
 RoleSchema.statics.updateRoleStats = async function (roleId) {
   const User = mongoose.model("User");
 
@@ -659,17 +884,14 @@ RoleSchema.statics.updateRoleStats = async function (roleId) {
 };
 
 // ================================
-// MIDDLEWARES
+// MIDDLEWARES (mantener compatibilidad)
 // ================================
 
-// Pre-save middleware
 RoleSchema.pre("save", async function (next) {
-  // Normalizar nombre del rol
   if (this.roleName) {
     this.roleName = this.roleName.toLowerCase().trim();
   }
 
-  // Verificar jerarquía del rol padre
   if (this.parentRole && this.hierarchy !== undefined) {
     try {
       const parentRole = await this.constructor.findById(this.parentRole);
@@ -683,7 +905,6 @@ RoleSchema.pre("save", async function (next) {
     }
   }
 
-  // Solo puede haber un rol por defecto
   if (this.isDefault && this.isModified("isDefault")) {
     await this.constructor.updateMany(
       { _id: { $ne: this._id } },
@@ -694,10 +915,11 @@ RoleSchema.pre("save", async function (next) {
   next();
 });
 
-// Post-save middleware
 RoleSchema.post("save", function (doc, next) {
   if (doc.isNew) {
-    console.log(`✅ Rol creado: ${doc.displayName} (${doc.roleName})`);
+    console.log(
+      `✅ Rol creado: ${doc.displayName?.original?.text || doc.roleName}`
+    );
   }
   next();
 });

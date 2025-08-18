@@ -5,149 +5,310 @@ import mongoose from "mongoose";
 import {
   BaseSchemeFields,
   setupBaseSchema,
-  CommonValidators,
 } from "../../core/models/base.scheme.js";
-
-// =============================================================================
-// src/modules/business/models/address.scheme.js
-// =============================================================================
-import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
-  setupBaseSchema,
-  CommonValidators,
-} from "../../core/models/base.scheme.js";
+  MultiLanguageContentSchema,
+  createMultiLanguageField,
+} from "../../core/models/multi_language_pattern.scheme.js";
 
 /**
- * Schema para componentes de dirección estructurada
+ * Schema para coordenadas geográficas con precisión
  */
-const AddressComponentsSchema = new mongoose.Schema(
+const CoordinatesSchema = new mongoose.Schema(
   {
-    streetNumber: {
+    type: {
       type: String,
-      trim: true,
-      maxlength: [20, "El número de calle no puede exceder 20 caracteres"],
+      enum: ["Point"],
+      default: "Point",
+      required: true,
     },
-    route: {
-      type: String,
-      trim: true,
-      maxlength: [200, "La ruta no puede exceder 200 caracteres"],
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      required: true,
+      validate: {
+        validator: function (coords) {
+          return (
+            coords.length === 2 &&
+            coords[0] >= -180 &&
+            coords[0] <= 180 && // longitude
+            coords[1] >= -90 &&
+            coords[1] <= 90 // latitude
+          );
+        },
+        message: "Coordenadas inválidas. Formato: [longitude, latitude]",
+      },
+      index: "2dsphere",
     },
-    neighborhood: {
-      type: String,
-      trim: true,
-      maxlength: [100, "El barrio no puede exceder 100 caracteres"],
-      index: true,
-    },
-    locality: {
-      type: String,
-      trim: true,
-      maxlength: [100, "La localidad no puede exceder 100 caracteres"],
-      index: true,
-    },
-    sublocality: {
-      type: String,
-      trim: true,
-      maxlength: [100, "La sublocalidad no puede exceder 100 caracteres"],
-    },
-    administrativeAreaLevel1: {
-      type: String,
-      trim: true,
-      maxlength: [
-        100,
-        "El área administrativa nivel 1 no puede exceder 100 caracteres",
-      ],
-      index: true,
-    },
-    administrativeAreaLevel2: {
-      type: String,
-      trim: true,
-      maxlength: [
-        100,
-        "El área administrativa nivel 2 no puede exceder 100 caracteres",
-      ],
-    },
-    premise: {
-      type: String,
-      trim: true,
-      maxlength: [50, "La premisa no puede exceder 50 caracteres"],
-    },
-    subpremise: {
-      type: String,
-      trim: true,
-      maxlength: [50, "La subpremisa no puede exceder 50 caracteres"],
-    },
-  },
-  { _id: false }
-);
-
-/**
- * Schema para metadatos de geolocalización
- */
-const GeolocationMetadataSchema = new mongoose.Schema(
-  {
     accuracy: {
       type: Number,
-      min: [0, "La precisión no puede ser negativa"],
-      max: [100, "La precisión no puede exceder 100"],
+      min: 0,
+      max: 10000, // metros
+      default: 10,
     },
-    locationType: {
+    source: {
       type: String,
-      enum: [
-        "ROOFTOP",
-        "RANGE_INTERPOLATED",
-        "GEOMETRIC_CENTER",
-        "APPROXIMATE",
-      ],
-      default: "APPROXIMATE",
+      enum: ["gps", "geocoding", "manual", "ip_geolocation", "user_input"],
+      default: "geocoding",
     },
-    viewportBounds: {
-      northeast: {
-        lat: { type: Number },
-        lng: { type: Number },
-      },
-      southwest: {
-        lat: { type: Number },
-        lng: { type: Number },
-      },
+    verifiedAt: {
+      type: Date,
     },
-    elevation: {
-      type: Number,
-      default: null,
-    },
-    heading: {
-      type: Number,
-      min: [0, "El rumbo debe estar entre 0 y 360"],
-      max: [360, "El rumbo debe estar entre 0 y 360"],
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de Dirección
+ * Schema para dirección formateada según estándares internacionales
+ */
+const FormattedAddressSchema = new mongoose.Schema(
+  {
+    // Dirección completa para cada idioma
+    fullAddress: createMultiLanguageField({
+      required: true,
+    }),
+
+    // Dirección corta (solo elementos principales)
+    shortAddress: createMultiLanguageField({
+      required: true,
+    }),
+
+    // Dirección para navegación
+    navigationAddress: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+    },
+
+    lastFormatted: {
+      type: Date,
+      default: Date.now,
+    },
+
+    formattingSource: {
+      type: String,
+      enum: ["google_maps", "openstreetmap", "manual", "system"],
+      default: "system",
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para información de validación de dirección
+ */
+const AddressValidationSchema = new mongoose.Schema(
+  {
+    isValidated: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    validationScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
+
+    validationMethod: {
+      type: String,
+      enum: ["google_maps", "postal_service", "manual", "user_confirmed"],
+    },
+
+    validatedAt: {
+      type: Date,
+    },
+
+    validatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+
+    validationErrors: [
+      {
+        field: String,
+        error: String,
+        severity: {
+          type: String,
+          enum: ["low", "medium", "high"],
+          default: "medium",
+        },
+      },
+    ],
+
+    validationWarnings: [
+      {
+        field: String,
+        warning: String,
+        autoFixApplied: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+
+    lastValidationCheck: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para metadatos adicionales de ubicación
+ */
+const LocationMetadataSchema = new mongoose.Schema(
+  {
+    // Información de zona horaria
+    timezone: {
+      type: String,
+      required: true,
+      default: "America/Lima",
+    },
+
+    utcOffset: {
+      type: String, // ej: "-05:00"
+      required: true,
+      default: "-05:00",
+    },
+
+    // Información demográfica básica
+    population: {
+      type: Number,
+      min: 0,
+    },
+
+    elevationMeters: {
+      type: Number,
+    },
+
+    // Códigos postales adicionales
+    alternativePostalCodes: [String],
+
+    // Información de calidad del área
+    areaQuality: {
+      residential: {
+        type: String,
+        enum: ["low", "medium", "high", "luxury"],
+      },
+      commercial: {
+        type: String,
+        enum: ["low", "medium", "high"],
+      },
+      safety: {
+        type: String,
+        enum: ["low", "medium", "high"],
+      },
+      accessibility: {
+        type: String,
+        enum: ["low", "medium", "high"],
+      },
+    },
+
+    // Servicios cercanos
+    nearbyServices: {
+      hasPublicTransport: {
+        type: Boolean,
+        default: false,
+      },
+      hasParking: {
+        type: Boolean,
+        default: false,
+      },
+      hasBankAccess: {
+        type: Boolean,
+        default: false,
+      },
+      hasHospitalNearby: {
+        type: Boolean,
+        default: false,
+      },
+      distance: {
+        toMainRoad: Number, // metros
+        toPublicTransport: Number,
+        toCityCenter: Number,
+      },
+    },
+
+    lastUpdated: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema principal de Address
  */
 const AddressSchema = new mongoose.Schema({
-  // Dirección estructurada básica
+  // Identificación
+  addressId: {
+    type: mongoose.Schema.Types.ObjectId,
+    default: () => new mongoose.Types.ObjectId(),
+    unique: true,
+    index: true,
+  },
+
+  // Información de dirección básica
   streetAddress: {
     type: String,
     required: [true, "La dirección de calle es requerida"],
     trim: true,
     maxlength: [200, "La dirección no puede exceder 200 caracteres"],
-    index: "text",
+    index: true,
+  },
+
+  streetNumber: {
+    type: String,
+    trim: true,
+    maxlength: 20,
+  },
+
+  floor: {
+    type: String,
+    trim: true,
+    maxlength: 10,
   },
 
   apartment: {
     type: String,
     trim: true,
-    maxlength: [50, "El apartamento/unidad no puede exceder 50 caracteres"],
+    maxlength: 20,
+  },
+
+  building: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+  },
+
+  // División administrativa
+  neighborhood: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    index: true,
+  },
+
+  district: {
+    type: String,
+    trim: true,
+    maxlength: 100,
+    index: true,
   },
 
   city: {
     type: String,
     required: [true, "La ciudad es requerida"],
     trim: true,
-    maxlength: [100, "La ciudad no puede exceder 100 caracteres"],
+    maxlength: 100,
     index: true,
   },
 
@@ -155,144 +316,112 @@ const AddressSchema = new mongoose.Schema({
     type: String,
     required: [true, "El estado/provincia es requerido"],
     trim: true,
-    maxlength: [100, "El estado no puede exceder 100 caracteres"],
+    maxlength: 100,
     index: true,
   },
 
   country: {
     type: String,
     required: [true, "El país es requerido"],
-    trim: true,
-    maxlength: [100, "El país no puede exceder 100 caracteres"],
+    uppercase: true,
+    length: 2, // Código ISO de país
+    match: /^[A-Z]{2}$/,
+    default: "PE",
     index: true,
+  },
+
+  countryName: {
+    type: String,
+    required: true,
+    trim: true,
+    maxlength: 100,
     default: "Perú",
   },
 
   postalCode: {
     type: String,
     trim: true,
-    maxlength: [20, "El código postal no puede exceder 20 caracteres"],
+    maxlength: 20,
     index: true,
-  },
+    validate: {
+      validator: function (code) {
+        if (!code) return true; // Postal code es opcional
 
-  // Coordenadas geográficas (CRÍTICO para geolocalización)
-  coordinates: {
-    type: {
-      type: String,
-      enum: ["Point"],
-      default: "Point",
-    },
-    coordinates: {
-      type: [Number], // [longitude, latitude]
-      required: [true, "Las coordenadas son requeridas"],
-      validate: {
-        validator: function (coords) {
-          return (
-            coords &&
-            coords.length === 2 &&
-            coords[0] >= -180 &&
-            coords[0] <= 180 && // Longitude
-            coords[1] >= -90 &&
-            coords[1] <= 90
-          ); // Latitude
-        },
-        message:
-          "Las coordenadas deben estar en formato [longitude, latitude] válido",
+        // Validaciones por país
+        const patterns = {
+          PE: /^\d{5}$/, // Perú: 5 dígitos
+          US: /^\d{5}(-\d{4})?$/, // USA: 12345 o 12345-6789
+          ES: /^\d{5}$/, // España: 5 dígitos
+          MX: /^\d{5}$/, // México: 5 dígitos
+        };
+
+        const pattern = patterns[this.country];
+        return pattern ? pattern.test(code) : true;
       },
-      index: "2dsphere",
+      message: "Formato de código postal inválido para el país especificado",
     },
   },
 
-  // Componentes estructurados de la dirección
-  components: AddressComponentsSchema,
+  // Coordenadas geográficas
+  location: {
+    type: CoordinatesSchema,
+    required: true,
+  },
 
   // Dirección formateada
   formattedAddress: {
-    type: String,
-    required: [true, "La dirección formateada es requerida"],
-    maxlength: [500, "La dirección formateada no puede exceder 500 caracteres"],
-    index: "text",
+    type: FormattedAddressSchema,
+    required: true,
   },
 
-  // Información adicional
+  // Validación
+  validation: {
+    type: AddressValidationSchema,
+    default: () => ({}),
+  },
+
+  // Metadatos de ubicación
+  metadata: {
+    type: LocationMetadataSchema,
+    default: () => ({}),
+  },
+
+  // Tipo de dirección
   addressType: {
     type: String,
     enum: [
       "business",
       "residential",
-      "office",
-      "warehouse",
-      "store",
-      "industrial",
       "commercial",
+      "industrial",
+      "government",
+      "educational",
+      "healthcare",
+      "mixed_use",
+      "other",
     ],
     default: "business",
     index: true,
   },
 
-  // Validación y calidad de datos
-  isValidated: {
+  // Estado de la dirección
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
+
+  isPrimary: {
     type: Boolean,
     default: false,
-    index: true,
   },
 
-  validationSource: {
-    type: String,
-    enum: [
-      "google_maps",
-      "openstreetmap",
-      "manual",
-      "user_input",
-      "gps",
-      "api_service",
-    ],
-    index: true,
+  isPublic: {
+    type: Boolean,
+    default: true, // false para direcciones privadas
   },
 
-  validatedAt: {
-    type: Date,
-  },
-
-  validationScore: {
-    type: Number,
-    min: [0, "El puntaje de validación debe ser entre 0 y 100"],
-    max: [100, "El puntaje de validación debe ser entre 0 y 100"],
-    default: 50,
-  },
-
-  // Metadatos geográficos
-  geolocationMetadata: GeolocationMetadataSchema,
-
-  timezone: {
-    type: String,
-    default: "America/Lima",
-    validate: {
-      validator: function (v) {
-        // Validación básica de timezone
-        return /^[A-Za-z_\/]+$/.test(v);
-      },
-      message: "Zona horaria no válida",
-    },
-  },
-
-  plusCode: {
-    type: String,
-    trim: true,
-    maxlength: [20, "El Plus Code no puede exceder 20 caracteres"],
-    validate: {
-      validator: function (v) {
-        // Validación básica de Google Plus Code
-        return (
-          !v ||
-          /^[23456789CFGHJMPQRVWX]{8}\+[23456789CFGHJMPQRVWX]{2,3}$/.test(v)
-        );
-      },
-      message: "Plus Code no válido",
-    },
-  },
-
-  // Referencias y relaciones
+  // Referencias
   businessId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Business",
@@ -305,205 +434,252 @@ const AddressSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Información de accesibilidad
-  accessibility: {
-    wheelchairAccessible: {
-      type: Boolean,
-      default: null,
-    },
-    hasParking: {
-      type: Boolean,
-      default: null,
-    },
-    parkingDetails: {
-      type: String,
-      maxlength: [
-        200,
-        "Los detalles de estacionamiento no pueden exceder 200 caracteres",
-      ],
-    },
-    publicTransportNearby: {
-      type: Boolean,
-      default: null,
-    },
-    nearestStation: {
-      name: String,
-      distance: Number, // en metros
-      type: {
-        type: String,
-        enum: ["bus", "metro", "train", "taxi", "bike_share"],
-      },
-    },
-  },
-
-  // Información de entorno
-  environment: {
-    isUrban: {
+  // Configuración de privacidad
+  privacySettings: {
+    showFullAddress: {
       type: Boolean,
       default: true,
     },
-    populationDensity: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "medium",
-    },
-    safetyRating: {
-      type: Number,
-      min: [1, "El rating de seguridad debe estar entre 1 y 5"],
-      max: [5, "El rating de seguridad debe estar entre 1 y 5"],
-    },
-    noiseLevel: {
-      type: String,
-      enum: ["quiet", "moderate", "noisy"],
-      default: "moderate",
-    },
-  },
-
-  // Cache de direcciones alternativas
-  alternativeFormats: {
-    short: String,
-    long: String,
-    international: String,
-    local: String,
-  },
-
-  // Metadatos de uso
-  usage: {
-    searchCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    lastSearched: Date,
-    clickCount: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    lastClicked: Date,
-    isPopular: {
+    showExactLocation: {
       type: Boolean,
-      default: false,
-      index: true,
+      default: true,
+    },
+    proximityRadius: {
+      type: Number,
+      min: 0,
+      max: 5000, // metros
+      default: 0, // 0 = ubicación exacta
     },
   },
 
-  // Campos base (auditoría, soft delete, etc.)
+  // Notas adicionales
+  notes: {
+    type: String,
+    maxlength: 500,
+    trim: true,
+  },
+
+  deliveryInstructions: {
+    type: String,
+    maxlength: 300,
+    trim: true,
+  },
+
+  landmarks: [
+    {
+      type: String,
+      maxlength: 100,
+      trim: true,
+    },
+  ],
+
+  // Campos base de auditoría
   ...BaseSchemeFields,
 });
 
-// Configurar el esquema con funcionalidades base
+// Configurar esquema con funcionalidades base
 setupBaseSchema(AddressSchema, {
-  addBaseFields: false, // Ya los agregamos manualmente arriba
+  addTimestamps: false, // Ya incluidos en BaseSchemeFields
 });
 
 // ================================
 // ÍNDICES ESPECÍFICOS
 // ================================
 
-// Índice geográfico principal (CRÍTICO para geolocalización)
-AddressSchema.index({ coordinates: "2dsphere" });
+// Índice geoespacial principal (ya definido en coordinates)
+AddressSchema.index({ "location.coordinates": "2dsphere" });
 
-// Índices para búsqueda geográfica optimizada
-AddressSchema.index({ city: 1, state: 1, country: 1 });
-AddressSchema.index({ postalCode: 1, country: 1 });
-AddressSchema.index({ country: 1, state: 1, city: 1 });
+// Índices compuestos para búsquedas geográficas
+AddressSchema.index({
+  country: 1,
+  state: 1,
+  city: 1,
+  isActive: 1,
+});
 
-// Índices para relaciones
-AddressSchema.index({ businessId: 1 });
-AddressSchema.index({ userId: 1 });
+AddressSchema.index({
+  addressType: 1,
+  "location.coordinates": "2dsphere",
+  isActive: 1,
+});
 
-// Índices para filtrado
-AddressSchema.index({ addressType: 1, isValidated: 1 });
-AddressSchema.index({ validationSource: 1, validatedAt: -1 });
-AddressSchema.index({ "usage.isPopular": 1, "usage.searchCount": -1 });
+// Índices para validación
+AddressSchema.index({
+  "validation.isValidated": 1,
+  "validation.validationScore": -1,
+});
 
-// Índice de texto para búsqueda
+// Índices para búsqueda de texto
 AddressSchema.index(
   {
-    formattedAddress: "text",
     streetAddress: "text",
+    neighborhood: "text",
     city: "text",
-    "components.neighborhood": "text",
+    state: "text",
   },
   {
     name: "address_search_index",
     weights: {
-      formattedAddress: 10,
-      streetAddress: 8,
+      streetAddress: 10,
+      neighborhood: 8,
       city: 6,
-      "components.neighborhood": 4,
+      state: 4,
     },
   }
 );
 
+// Índices para referencias
+AddressSchema.index({ businessId: 1, isPrimary: 1 });
+AddressSchema.index({ userId: 1, addressType: 1 });
+
 // ================================
-// VIRTUALS
+// MIDDLEWARE
 // ================================
 
-// Virtual para latitud
-AddressSchema.virtual("latitude").get(function () {
-  return this.coordinates?.coordinates[1];
-});
+// Pre-save middleware
+AddressSchema.pre("save", async function (next) {
+  try {
+    // Auto-formatear dirección si es nueva o cambió
+    if (
+      this.isNew ||
+      this.isModified(["streetAddress", "city", "state", "country"])
+    ) {
+      await this.autoFormatAddress();
+    }
 
-// Virtual para longitud
-AddressSchema.virtual("longitude").get(function () {
-  return this.coordinates?.coordinates[0];
-});
+    // Validar coordenadas
+    if (this.location?.coordinates) {
+      const [lng, lat] = this.location.coordinates;
+      if (lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        return next(new Error("Coordenadas geográficas inválidas"));
+      }
+    }
 
-// Virtual para dirección corta
-AddressSchema.virtual("shortAddress").get(function () {
-  if (this.alternativeFormats?.short) {
-    return this.alternativeFormats.short;
+    // Auto-detectar timezone si no está establecido
+    if (!this.metadata.timezone && this.location?.coordinates) {
+      this.metadata.timezone = await this.detectTimezone();
+    }
+
+    // Actualizar timestamp de metadatos
+    this.metadata.lastUpdated = new Date();
+
+    next();
+  } catch (error) {
+    next(error);
   }
-  return `${this.streetAddress}, ${this.city}`;
 });
 
-// Virtual para dirección completa
-AddressSchema.virtual("fullAddress").get(function () {
-  let parts = [this.streetAddress];
-
-  if (this.apartment) parts.push(`Apt ${this.apartment}`);
-  parts.push(this.city);
-  parts.push(this.state);
-  if (this.postalCode) parts.push(this.postalCode);
-  parts.push(this.country);
-
-  return parts.join(", ");
-});
-
-// Virtual para verificar calidad de datos
-AddressSchema.virtual("dataQuality").get(function () {
-  let score = 0;
-
-  // Factores de calidad
-  if (this.isValidated) score += 30;
-  if (this.coordinates && this.geolocationMetadata?.accuracy > 80) score += 25;
-  if (this.postalCode) score += 15;
-  if (this.components?.neighborhood) score += 10;
-  if (this.plusCode) score += 10;
-  if (this.validationSource && this.validationSource !== "user_input")
-    score += 10;
-
-  return Math.min(score, 100);
+// Post-save middleware
+AddressSchema.post("save", function (doc) {
+  if (doc.isNew) {
+    console.log(
+      `✅ Dirección creada: ${doc.city}, ${doc.state} (${doc.location.coordinates})`
+    );
+  }
 });
 
 // ================================
 // MÉTODOS DE INSTANCIA
 // ================================
 
-// Método para calcular distancia a otro punto
-AddressSchema.methods.distanceTo = function (otherCoordinates, unit = "km") {
-  if (!this.coordinates?.coordinates || !otherCoordinates) {
-    return null;
+/**
+ * Auto-formatear dirección según estándares locales
+ */
+AddressSchema.methods.autoFormatAddress = async function () {
+  const addressParts = [];
+
+  // Construir dirección según país
+  if (this.streetAddress) {
+    let streetPart = this.streetAddress;
+    if (this.streetNumber) {
+      streetPart = `${this.streetAddress} ${this.streetNumber}`;
+    }
+    addressParts.push(streetPart);
   }
 
-  const [lon1, lat1] = this.coordinates.coordinates;
-  const [lon2, lat2] = Array.isArray(otherCoordinates)
-    ? otherCoordinates
-    : [otherCoordinates.longitude, otherCoordinates.latitude];
+  if (this.apartment || this.floor) {
+    const unitParts = [];
+    if (this.floor) unitParts.push(`Piso ${this.floor}`);
+    if (this.apartment) unitParts.push(`Apt. ${this.apartment}`);
+    if (unitParts.length > 0) {
+      addressParts.push(unitParts.join(", "));
+    }
+  }
 
-  const R = unit === "km" ? 6371 : 3959; // Radio de la Tierra en km o millas
+  if (this.neighborhood) addressParts.push(this.neighborhood);
+  if (this.district && this.district !== this.city)
+    addressParts.push(this.district);
+  if (this.city) addressParts.push(this.city);
+  if (this.state) addressParts.push(this.state);
+  if (this.postalCode) addressParts.push(this.postalCode);
+  if (this.countryName) addressParts.push(this.countryName);
+
+  const fullAddress = addressParts.join(", ");
+  const shortAddress = [this.streetAddress, this.city, this.state]
+    .filter(Boolean)
+    .join(", ");
+
+  this.formattedAddress = {
+    fullAddress: {
+      original: { language: "es", text: fullAddress },
+      translations: new Map(),
+      availableLanguages: ["es"],
+      lastUpdated: new Date(),
+    },
+    shortAddress: {
+      original: { language: "es", text: shortAddress },
+      translations: new Map(),
+      availableLanguages: ["es"],
+      lastUpdated: new Date(),
+    },
+    navigationAddress: fullAddress,
+    lastFormatted: new Date(),
+    formattingSource: "system",
+  };
+};
+
+/**
+ * Detectar zona horaria basada en coordenadas
+ */
+AddressSchema.methods.detectTimezone = async function () {
+  // Implementación simplificada - en producción usar servicio como TimeZoneDB
+  const timezones = {
+    PE: "America/Lima",
+    US: "America/New_York", // Default, debería ser más específico
+    MX: "America/Mexico_City",
+    ES: "Europe/Madrid",
+    AR: "America/Argentina/Buenos_Aires",
+    CL: "America/Santiago",
+    CO: "America/Bogota",
+  };
+
+  return timezones[this.country] || "UTC";
+};
+
+/**
+ * Calcular distancia a otra dirección
+ */
+AddressSchema.methods.distanceTo = function (otherAddress) {
+  if (!this.location?.coordinates || !otherAddress.location?.coordinates) {
+    throw new Error("Ambas direcciones deben tener coordenadas");
+  }
+
+  const [lng1, lat1] = this.location.coordinates;
+  const [lng2, lat2] = otherAddress.location.coordinates;
+
+  return this.calculateHaversineDistance(lat1, lng1, lat2, lng2);
+};
+
+/**
+ * Calcular distancia usando fórmula de Haversine
+ */
+AddressSchema.methods.calculateHaversineDistance = function (
+  lat1,
+  lon1,
+  lat2,
+  lon2
+) {
+  const R = 6371000; // Radio de la Tierra en metros
   const dLat = this.toRadians(lat2 - lat1);
   const dLon = this.toRadians(lon2 - lon1);
 
@@ -515,283 +691,252 @@ AddressSchema.methods.distanceTo = function (otherCoordinates, unit = "km") {
       Math.sin(dLon / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distance = R * c;
-
-  return Math.round(distance * 100) / 100; // Redondear a 2 decimales
+  return R * c; // Distancia en metros
 };
 
-// Método auxiliar para convertir grados a radianes
+/**
+ * Convertir grados a radianes
+ */
 AddressSchema.methods.toRadians = function (degrees) {
-  return degrees * (Math.PI / 180);
+  return (degrees * Math.PI) / 180;
 };
 
-// Método para validar dirección
-AddressSchema.methods.validateAddress = async function (source = "manual") {
-  // Aquí iría la lógica de validación con servicios externos
-  // Por ahora, marcamos como validado
-  this.isValidated = true;
-  this.validationSource = source;
-  this.validatedAt = new Date();
-  this.validationScore = this.dataQuality;
-
-  return this;
-};
-
-// Método para actualizar coordenadas
-AddressSchema.methods.updateCoordinates = function (
-  longitude,
-  latitude,
-  metadata = {}
+/**
+ * Validar dirección con servicio externo
+ */
+AddressSchema.methods.validateWithService = async function (
+  service = "google_maps"
 ) {
-  this.coordinates = {
-    type: "Point",
-    coordinates: [longitude, latitude],
-  };
+  try {
+    // Simular validación - implementar con servicio real
+    const validationResult = {
+      isValid: true,
+      score: 95,
+      errors: [],
+      warnings: [],
+    };
 
-  if (metadata.accuracy !== undefined) {
-    if (!this.geolocationMetadata) this.geolocationMetadata = {};
-    this.geolocationMetadata.accuracy = metadata.accuracy;
-    this.geolocationMetadata.locationType =
-      metadata.locationType || "APPROXIMATE";
+    this.validation = {
+      isValidated: validationResult.isValid,
+      validationScore: validationResult.score,
+      validationMethod: service,
+      validatedAt: new Date(),
+      validationErrors: validationResult.errors,
+      validationWarnings: validationResult.warnings,
+      lastValidationCheck: new Date(),
+    };
+
+    return this.save();
+  } catch (error) {
+    console.error("Error validando dirección:", error);
+    return false;
   }
-
-  return this;
 };
 
-// Método para incrementar contadores de uso
-AddressSchema.methods.recordUsage = function (type = "search") {
-  if (!this.usage) {
-    this.usage = { searchCount: 0, clickCount: 0 };
+/**
+ * Obtener dirección formateada en idioma específico
+ */
+AddressSchema.methods.getFormattedAddress = function (
+  language = "es",
+  format = "full"
+) {
+  const addressField = format === "full" ? "fullAddress" : "shortAddress";
+
+  if (this.formattedAddress?.[addressField]) {
+    const content = this.formattedAddress[addressField];
+    return content.getText ? content.getText(language) : content;
   }
 
-  if (type === "search") {
-    this.usage.searchCount++;
-    this.usage.lastSearched = new Date();
-  } else if (type === "click") {
-    this.usage.clickCount++;
-    this.usage.lastClicked = new Date();
-  }
-
-  // Marcar como popular si tiene muchas búsquedas
-  this.usage.isPopular = this.usage.searchCount > 50;
-
-  return this;
+  // Fallback a formateo dinámico
+  return format === "full"
+    ? `${this.streetAddress}, ${this.city}, ${this.state}, ${this.countryName}`
+    : `${this.streetAddress}, ${this.city}`;
 };
 
-// Método para obtener dirección en formato específico
-AddressSchema.methods.getFormattedAddress = function (format = "standard") {
-  switch (format) {
-    case "short":
-      return this.shortAddress;
-    case "full":
-      return this.fullAddress;
-    case "international":
-      return this.alternativeFormats?.international || this.formattedAddress;
-    case "local":
-      return (
-        this.alternativeFormats?.local || `${this.streetAddress}, ${this.city}`
-      );
-    default:
-      return this.formattedAddress;
-  }
+/**
+ * Verificar si está dentro de un radio específico
+ */
+AddressSchema.methods.isWithinRadius = function (
+  centerCoordinates,
+  radiusInMeters
+) {
+  if (!this.location?.coordinates) return false;
+
+  const [centerLng, centerLat] = centerCoordinates;
+  const [thisLng, thisLat] = this.location.coordinates;
+
+  const distance = this.calculateHaversineDistance(
+    centerLat,
+    centerLng,
+    thisLat,
+    thisLng
+  );
+  return distance <= radiusInMeters;
 };
 
 // ================================
 // MÉTODOS ESTÁTICOS
 // ================================
 
-// Buscar direcciones por proximidad
+/**
+ * Buscar direcciones cerca de un punto
+ */
 AddressSchema.statics.findNearby = function (
-  longitude,
-  latitude,
-  maxDistance = 5000,
+  coordinates,
+  maxDistanceMeters = 5000,
   options = {}
 ) {
-  const {
-    limit = 20,
-    addressType = null,
-    isValidated = null,
-    minValidationScore = 0,
-  } = options;
-
-  let query = this.find({
-    coordinates: {
+  const query = {
+    "location.coordinates": {
       $near: {
         $geometry: {
           type: "Point",
-          coordinates: [longitude, latitude],
+          coordinates: coordinates, // [longitude, latitude]
         },
-        $maxDistance: maxDistance, // en metros
+        $maxDistance: maxDistanceMeters,
       },
     },
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
+    isActive: true,
+  };
 
   // Aplicar filtros adicionales
-  if (addressType) {
-    query = query.where({ addressType });
-  }
+  if (options.addressType) query.addressType = options.addressType;
+  if (options.country) query.country = options.country;
+  if (options.state) query.state = options.state;
+  if (options.city) query.city = options.city;
 
-  if (isValidated !== null) {
-    query = query.where({ isValidated });
-  }
-
-  if (minValidationScore > 0) {
-    query = query.where({ validationScore: { $gte: minValidationScore } });
-  }
-
-  return query.limit(limit);
+  return this.find(query).limit(options.limit || 50);
 };
 
-// Buscar direcciones dentro de un área
-AddressSchema.statics.findWithinBounds = function (bounds, options = {}) {
-  const { southwest, northeast } = bounds;
-  const { limit = 50, addressType = null } = options;
-
-  let query = this.find({
-    coordinates: {
+/**
+ * Buscar direcciones dentro de un área rectangular
+ */
+AddressSchema.statics.findInBoundingBox = function (
+  northEast,
+  southWest,
+  options = {}
+) {
+  const query = {
+    "location.coordinates": {
       $geoWithin: {
         $box: [
-          [southwest.lng, southwest.lat],
-          [northeast.lng, northeast.lat],
+          [southWest.lng, southWest.lat], // esquina inferior izquierda
+          [northEast.lng, northEast.lat], // esquina superior derecha
         ],
       },
     },
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
+    isActive: true,
+  };
 
-  if (addressType) {
-    query = query.where({ addressType });
-  }
+  if (options.addressType) query.addressType = options.addressType;
 
-  return query.limit(limit);
+  return this.find(query).limit(options.limit || 100);
 };
 
-// Buscar direcciones por ciudad
-AddressSchema.statics.findByCity = function (city, options = {}) {
-  const { limit = 50, state = null, country = "Perú" } = options;
+/**
+ * Geocodificar dirección (integración futura)
+ */
+AddressSchema.statics.geocodeAddress = async function (addressString) {
+  // Placeholder para integración con servicio de geocodificación
+  console.log(`Geocodificando: ${addressString}`);
 
-  let query = this.find({
-    city: new RegExp(city, "i"),
-    country: country,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
-
-  if (state) {
-    query = query.where({ state: new RegExp(state, "i") });
-  }
-
-  return query.limit(limit).sort({ "usage.searchCount": -1 });
+  // Retornar coordenadas de ejemplo (Lima, Perú)
+  return {
+    coordinates: [-77.0428, -12.0464], // [longitude, latitude]
+    accuracy: 10,
+    source: "geocoding",
+  };
 };
 
-// Obtener estadísticas de direcciones
-AddressSchema.statics.getAddressStats = async function () {
-  const stats = await this.aggregate([
-    {
-      $match: {
-        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-      },
-    },
+/**
+ * Obtener estadísticas por región
+ */
+AddressSchema.statics.getRegionStats = function (country, state = null) {
+  const matchConditions = { country, isActive: true };
+  if (state) matchConditions.state = state;
+
+  return this.aggregate([
+    { $match: matchConditions },
     {
       $group: {
-        _id: null,
+        _id: state ? "$city" : "$state",
         totalAddresses: { $sum: 1 },
-        validatedAddresses: {
-          $sum: { $cond: [{ $eq: ["$isValidated", true] }, 1, 0] },
-        },
         businessAddresses: {
-          $sum: { $cond: [{ $ne: ["$businessId", null] }, 1, 0] },
+          $sum: { $cond: [{ $eq: ["$addressType", "business"] }, 1, 0] },
         },
-        avgValidationScore: { $avg: "$validationScore" },
-        totalSearches: { $sum: "$usage.searchCount" },
+        validatedAddresses: {
+          $sum: { $cond: ["$validation.isValidated", 1, 0] },
+        },
+        avgValidationScore: { $avg: "$validation.validationScore" },
       },
     },
+    { $sort: { totalAddresses: -1 } },
   ]);
-
-  return (
-    stats[0] || {
-      totalAddresses: 0,
-      validatedAddresses: 0,
-      businessAddresses: 0,
-      avgValidationScore: 0,
-      totalSearches: 0,
-    }
-  );
-};
-
-// Obtener direcciones populares
-AddressSchema.statics.getPopularAddresses = function (limit = 10) {
-  return this.find({
-    "usage.isPopular": true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  })
-    .sort({ "usage.searchCount": -1 })
-    .limit(limit)
-    .populate("businessId", "businessName");
-};
-
-// Limpiar direcciones no validadas antiguas
-AddressSchema.statics.cleanupUnvalidatedAddresses = async function (
-  daysOld = 30
-) {
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-
-  const result = await this.updateMany(
-    {
-      isValidated: false,
-      createdAt: { $lt: cutoffDate },
-      "usage.searchCount": { $lt: 5 }, // Direcciones poco usadas
-    },
-    {
-      $set: { isDeleted: true, deletedAt: new Date() },
-    }
-  );
-
-  return result;
 };
 
 // ================================
-// MIDDLEWARES
+// VIRTUALES
 // ================================
 
-// Pre-save middleware
-AddressSchema.pre("save", function (next) {
-  // Normalizar datos
-  if (this.city) this.city = this.city.trim();
-  if (this.state) this.state = this.state.trim();
-  if (this.country) this.country = this.country.trim();
-
-  // Generar dirección formateada si no existe
-  if (!this.formattedAddress) {
-    this.formattedAddress = this.fullAddress;
-  }
-
-  // Generar formatos alternativos
-  if (!this.alternativeFormats) {
-    this.alternativeFormats = {};
-  }
-
-  if (!this.alternativeFormats.short) {
-    this.alternativeFormats.short = this.shortAddress;
-  }
-
-  // Actualizar puntaje de validación
-  if (!this.validationScore) {
-    this.validationScore = this.dataQuality;
-  }
-
-  next();
+/**
+ * Virtual para obtener coordenadas como array simple
+ */
+AddressSchema.virtual("coordinates").get(function () {
+  return this.location?.coordinates || null;
 });
 
-// Post-save middleware
-AddressSchema.post("save", function (doc, next) {
-  if (doc.isNew) {
-    console.log(
-      `📍 Dirección creada: ${doc.city}, ${doc.state} (ID: ${doc._id})`
-    );
-  }
-  next();
+/**
+ * Virtual para obtener latitud
+ */
+AddressSchema.virtual("latitude").get(function () {
+  return this.location?.coordinates?.[1] || null;
+});
+
+/**
+ * Virtual para obtener longitud
+ */
+AddressSchema.virtual("longitude").get(function () {
+  return this.location?.coordinates?.[0] || null;
+});
+
+/**
+ * Virtual para dirección completa simple
+ */
+AddressSchema.virtual("fullAddressSimple").get(function () {
+  return this.getFormattedAddress("es", "full");
+});
+
+// ================================
+// CONFIGURACIÓN ADICIONAL
+// ================================
+
+// Configurar opciones de transformación para JSON
+AddressSchema.set("toJSON", {
+  virtuals: true,
+  transform: function (doc, ret) {
+    delete ret.__v;
+
+    // Aplicar configuración de privacidad
+    if (!doc.privacySettings?.showFullAddress) {
+      ret.streetAddress = "Dirección no disponible";
+      ret.streetNumber = undefined;
+      ret.apartment = undefined;
+      ret.floor = undefined;
+    }
+
+    if (
+      !doc.privacySettings?.showExactLocation &&
+      doc.privacySettings?.proximityRadius > 0
+    ) {
+      // Aplicar ruido a las coordenadas para privacidad
+      const radius = doc.privacySettings.proximityRadius / 111000; // Aproximado en grados
+      ret.location.coordinates[0] += (Math.random() - 0.5) * radius;
+      ret.location.coordinates[1] += (Math.random() - 0.5) * radius;
+      ret.location.accuracy = doc.privacySettings.proximityRadius;
+    }
+
+    return ret;
+  },
 });
 
 // ================================

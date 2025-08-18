@@ -1,5 +1,6 @@
 // =============================================================================
-// src/modules/business/models/business_category.scheme.js
+// src/modules/business/models/business_category.scheme.js - VERSIÓN OPTIMIZADA
+// Segundo esquema + mejores funcionalidades del primero
 // =============================================================================
 import mongoose from "mongoose";
 import {
@@ -10,11 +11,12 @@ import {
 import {
   createMultiLanguageField,
   createMultiLanguageContent,
+  MultiLanguageValidators,
   SUPPORTED_LANGUAGES,
 } from "../../core/models/multi_language_pattern.scheme.js";
 
 /**
- * Schema para metadatos específicos de categoría
+ * Schema para metadatos específicos de categoría (mejorado)
  */
 const CategoryMetadataSchema = new mongoose.Schema(
   {
@@ -34,6 +36,11 @@ const CategoryMetadataSchema = new mongoose.Schema(
       maxlength: [50, "El icono no puede exceder 50 caracteres"],
       default: "building",
     },
+    iconLibrary: {
+      type: String,
+      enum: ["fontawesome", "material", "custom", "emoji"],
+      default: "fontawesome",
+    },
     imageUrl: {
       type: String,
       validate: CommonValidators.url,
@@ -42,12 +49,31 @@ const CategoryMetadataSchema = new mongoose.Schema(
       type: String,
       validate: CommonValidators.url,
     },
+    // NUEVO: Del primer esquema - información de popularidad
+    popularityScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+      index: true,
+    },
+    isPromoted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    promotionWeight: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
   },
   { _id: false }
 );
 
 /**
- * Schema para configuración SEO de categoría
+ * Schema para configuración SEO de categoría (del segundo esquema)
  */
 const CategorySEOSchema = new mongoose.Schema(
   {
@@ -69,20 +95,129 @@ const CategorySEOSchema = new mongoose.Schema(
       type: String,
       validate: CommonValidators.url,
     },
+    // NUEVO: SEO adicional
+    focusKeyword: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+    },
+    seoScore: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 0,
+    },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de Categoría de Empresa
+ * Schema para códigos de industria (selectivo del primer esquema)
+ */
+const IndustryCodesSchema = new mongoose.Schema(
+  {
+    // Código personalizado del sistema
+    customCode: {
+      type: String,
+      uppercase: true,
+      maxlength: 20,
+      index: true,
+    },
+
+    // NAICS (North American Industry Classification System)
+    naicsCode: {
+      type: String,
+      trim: true,
+      maxlength: [10, "El código NAICS no puede exceder 10 caracteres"],
+      validate: {
+        validator: function (v) {
+          return !v || /^\d{2,6}$/.test(v);
+        },
+        message: "El código NAICS debe contener solo números (2-6 dígitos)",
+      },
+      index: true,
+    },
+
+    // Código de Google Business Categories (útil para integración)
+    googleBusinessCategory: {
+      type: String,
+      maxlength: 100,
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para palabras clave y búsqueda (simplificado del primer esquema)
+ */
+const SearchKeywordsSchema = new mongoose.Schema(
+  {
+    // Términos de búsqueda principales
+    primaryKeywords: [
+      {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 50,
+      },
+    ],
+
+    // Sinónimos y términos alternativos
+    aliases: createMultiLanguageField(false),
+
+    // Etiquetas para clasificación interna
+    tags: [
+      {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 30,
+      },
+    ],
+
+    // Palabras clave para SEO
+    seoKeywords: [
+      {
+        type: String,
+        trim: true,
+        lowercase: true,
+        maxlength: 50,
+      },
+    ],
+  },
+  { _id: false }
+);
+
+/**
+ * Schema principal de BusinessCategory (optimizado)
  */
 const BusinessCategorySchema = new mongoose.Schema({
-  // Información multiidioma
-  categoryName: createMultiLanguageField(true, { textIndex: true }),
-  description: createMultiLanguageField(false, { textIndex: true }),
-  shortDescription: createMultiLanguageField(false),
+  // Información multiidioma (del segundo esquema)
+  categoryName: createMultiLanguageField(true, {
+    textIndex: true,
+    validate: [
+      MultiLanguageValidators.hasOriginalText,
+      MultiLanguageValidators.minLength(2),
+      MultiLanguageValidators.maxLength(100),
+    ],
+  }),
 
-  // Estructura jerárquica
+  description: createMultiLanguageField(false, {
+    textIndex: true,
+    validate: [
+      MultiLanguageValidators.minLength(10),
+      MultiLanguageValidators.maxLength(500),
+    ],
+  }),
+
+  shortDescription: createMultiLanguageField(false, {
+    validate: [
+      MultiLanguageValidators.minLength(5),
+      MultiLanguageValidators.maxLength(150),
+    ],
+  }),
+
+  // Estructura jerárquica (del segundo esquema)
   parentCategory: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "BusinessCategory",
@@ -90,12 +225,19 @@ const BusinessCategorySchema = new mongoose.Schema({
     index: true,
     validate: {
       validator: function (v) {
-        // No puede ser su propia categoría padre
         return !v || !this._id || !v.equals(this._id);
       },
       message: "Una categoría no puede ser su propia categoría padre",
     },
   },
+
+  // NUEVO: Del primer esquema - Array de categorías hijas para navegación rápida
+  childCategories: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessCategory",
+    },
+  ],
 
   categoryLevel: {
     type: Number,
@@ -107,11 +249,11 @@ const BusinessCategorySchema = new mongoose.Schema({
 
   categoryPath: {
     type: String,
-    index: true, // Para búsqueda jerárquica rápida
+    index: true,
     maxlength: [200, "La ruta de categoría no puede exceder 200 caracteres"],
   },
 
-  // Identificadores y clasificación
+  // Identificadores únicos
   categorySlug: {
     type: String,
     required: [true, "El slug de categoría es requerido"],
@@ -126,27 +268,28 @@ const BusinessCategorySchema = new mongoose.Schema({
     index: true,
   },
 
-  industryCode: {
+  // NUEVO: Del primer esquema - Código de categoría para APIs
+  categoryCode: {
     type: String,
-    trim: true,
-    maxlength: [20, "El código de industria no puede exceder 20 caracteres"],
     uppercase: true,
-    index: true,
-  },
-
-  naicsCode: {
-    type: String,
     trim: true,
-    maxlength: [10, "El código NAICS no puede exceder 10 caracteres"],
-    validate: {
-      validator: function (v) {
-        return !v || /^\d{2,6}$/.test(v);
-      },
-      message: "El código NAICS debe contener solo números (2-6 dígitos)",
-    },
+    maxlength: 50,
+    match: /^[A-Z0-9_]+$/,
+    index: true,
+    sparse: true, // Permite que sea opcional pero único
   },
 
-  // Estado y configuración
+  // Códigos de industria (simplificado del primer esquema)
+  industryCodes: {
+    type: IndustryCodesSchema,
+  },
+
+  // Palabras clave de búsqueda (del primer esquema optimizado)
+  searchKeywords: {
+    type: SearchKeywordsSchema,
+  },
+
+  // Estado y configuración (del segundo esquema)
   isActive: {
     type: Boolean,
     default: true,
@@ -177,18 +320,25 @@ const BusinessCategorySchema = new mongoose.Schema({
     index: true,
   },
 
-  // Metadatos y presentación
+  // NUEVO: Del primer esquema - Control de moderación
+  autoApprove: {
+    type: Boolean,
+    default: true,
+  },
+
+  // Metadatos y presentación (mejorado)
   metadata: CategoryMetadataSchema,
 
-  // SEO y marketing
+  // SEO y marketing (del segundo esquema - CRÍTICO)
   seo: CategorySEOSchema,
 
-  // Estadísticas y métricas
+  // Estadísticas y métricas (del segundo esquema expandido)
   stats: {
     businessCount: {
       type: Number,
       default: 0,
       min: [0, "El conteo de empresas no puede ser negativo"],
+      index: true,
     },
     activeBusinessCount: {
       type: Number,
@@ -214,9 +364,14 @@ const BusinessCategorySchema = new mongoose.Schema({
     lastBusinessAdded: {
       type: Date,
     },
+    // NUEVO: Del primer esquema
+    lastStatsUpdate: {
+      type: Date,
+      default: Date.now,
+    },
   },
 
-  // Configuración específica de categoría
+  // Configuración específica de categoría (del segundo esquema)
   categoryConfig: {
     allowSubcategories: {
       type: Boolean,
@@ -235,6 +390,7 @@ const BusinessCategorySchema = new mongoose.Schema({
       type: Boolean,
       default: false,
     },
+    // NUEVO: Del primer esquema - Campos customizables por categoría
     customFields: [
       {
         fieldName: {
@@ -255,26 +411,20 @@ const BusinessCategorySchema = new mongoose.Schema({
         options: [String], // Para campos select/multiselect
       },
     ],
+    // NUEVO: Del primer esquema - Validación básica
+    minimumPhotos: {
+      type: Number,
+      min: 0,
+      max: 20,
+      default: 1,
+    },
+    requiresDocuments: {
+      type: Boolean,
+      default: false,
+    },
   },
 
-  // Campos de búsqueda y etiquetas
-  searchTags: [
-    {
-      type: String,
-      trim: true,
-      lowercase: true,
-      maxlength: [30, "Las etiquetas no pueden exceder 30 caracteres"],
-    },
-  ],
-
-  relatedCategories: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "BusinessCategory",
-    },
-  ],
-
-  // Restricciones geográficas
+  // Restricciones geográficas (del segundo esquema)
   geographicRestrictions: {
     allowedCountries: [
       {
@@ -296,111 +446,198 @@ const BusinessCategorySchema = new mongoose.Schema({
     },
   },
 
-  // Campos base (auditoría, soft delete, etc.)
+  // Relaciones entre categorías
+  relatedCategories: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessCategory",
+    },
+  ],
+
+  // Display y prioridad (del primer esquema)
+  displayPriority: {
+    type: Number,
+    min: 1,
+    max: 100,
+    default: 50,
+    index: true,
+  },
+
+  // Campos base de auditoría
   ...BaseSchemeFields,
 });
 
 // Configurar el esquema con funcionalidades base
 setupBaseSchema(BusinessCategorySchema, {
-  addBaseFields: false, // Ya los agregamos manualmente arriba
+  addTimestamps: false,
 });
 
 // ================================
-// ÍNDICES ESPECÍFICOS
+// ÍNDICES ESPECÍFICOS OPTIMIZADOS
 // ================================
 
 // Índices únicos
 BusinessCategorySchema.index({ categorySlug: 1 }, { unique: true });
+BusinessCategorySchema.index(
+  { categoryCode: 1 },
+  { unique: true, sparse: true }
+);
 
 // Índices jerárquicos
-BusinessCategorySchema.index({ parentCategory: 1, sortOrder: 1 });
+BusinessCategorySchema.index({
+  parentCategory: 1,
+  sortOrder: 1,
+  displayPriority: -1,
+});
 BusinessCategorySchema.index({ categoryLevel: 1, isActive: 1 });
 BusinessCategorySchema.index({ categoryPath: 1 });
 
 // Índices de estado y filtrado
-BusinessCategorySchema.index({ isActive: 1, isPublic: 1 });
-BusinessCategorySchema.index({ isFeatured: 1, isActive: 1 });
-BusinessCategorySchema.index({ requiresApproval: 1, isActive: 1 });
+BusinessCategorySchema.index({
+  isActive: 1,
+  isPublic: 1,
+  isFeatured: 1,
+});
 
 // Índices para búsqueda y clasificación
-BusinessCategorySchema.index({ industryCode: 1 });
-BusinessCategorySchema.index({ naicsCode: 1 });
-BusinessCategorySchema.index({ "metadata.category": 1 });
+BusinessCategorySchema.index({ "industryCodes.naicsCode": 1 });
+BusinessCategorySchema.index({ "industryCodes.customCode": 1 });
+BusinessCategorySchema.index({ "searchKeywords.primaryKeywords": 1 });
 
-// Índices para estadísticas
-BusinessCategorySchema.index({ "stats.businessCount": -1 });
-BusinessCategorySchema.index({ "stats.totalViews": -1 });
-BusinessCategorySchema.index({ "stats.averageRating": -1 });
+// Índices para estadísticas y popularidad
+BusinessCategorySchema.index({
+  "stats.businessCount": -1,
+  "metadata.popularityScore": -1,
+});
+BusinessCategorySchema.index({
+  "stats.averageRating": -1,
+  isActive: 1,
+});
 
-// Índice de texto multiidioma para búsqueda
+// Índices geográficos para restricciones
+BusinessCategorySchema.index({ "geographicRestrictions.allowedCountries": 1 });
+BusinessCategorySchema.index({
+  "geographicRestrictions.restrictedCountries": 1,
+});
+
+// Índice de texto multiidioma para búsqueda optimizada
 BusinessCategorySchema.index(
   {
     "categoryName.original.text": "text",
     "description.original.text": "text",
     "shortDescription.original.text": "text",
-    searchTags: "text",
+    "searchKeywords.primaryKeywords": "text",
+    "searchKeywords.tags": "text",
   },
   {
     name: "category_search_index",
     weights: {
       "categoryName.original.text": 10,
+      "searchKeywords.primaryKeywords": 8,
       "description.original.text": 5,
       "shortDescription.original.text": 3,
-      searchTags: 2,
+      "searchKeywords.tags": 2,
     },
   }
 );
 
 // ================================
-// VIRTUALS
+// MIDDLEWARE OPTIMIZADO
 // ================================
 
-// Virtual para verificar si es categoría raíz
-BusinessCategorySchema.virtual("isRootCategory").get(function () {
-  return !this.parentCategory && this.categoryLevel === 0;
+// Pre-save middleware
+BusinessCategorySchema.pre("save", async function (next) {
+  try {
+    // Generar slug si no existe
+    if (!this.categorySlug && this.categoryName?.original?.text) {
+      await this.generateUniqueSlug(this.categoryName.original.text);
+    }
+
+    // Generar categoryPath automáticamente (del primer esquema)
+    if (this.isNew || this.isModified("parentCategory")) {
+      this.categoryPath = await this.generateCategoryPath();
+    }
+
+    // Actualizar nivel de categoría automáticamente
+    if (
+      this.parentCategory &&
+      (this.isNew || this.isModified("parentCategory"))
+    ) {
+      const parent = await this.constructor.findById(this.parentCategory);
+      if (parent) {
+        this.categoryLevel = parent.categoryLevel + 1;
+
+        // Actualizar childCategories del padre (del primer esquema)
+        if (this.isNew) {
+          await this.constructor.findByIdAndUpdate(this.parentCategory, {
+            $addToSet: { childCategories: this._id },
+          });
+        }
+      }
+    } else if (!this.parentCategory) {
+      this.categoryLevel = 0;
+    }
+
+    // Validar profundidad máxima
+    if (this.categoryLevel > 5) {
+      return next(
+        new Error("La profundidad máxima de categorías es 5 niveles")
+      );
+    }
+
+    // Generar categoryCode si no existe
+    if (!this.categoryCode && this.categorySlug) {
+      this.categoryCode = this.categorySlug.toUpperCase().replace(/-/g, "_");
+    }
+
+    // Actualizar timestamp de estadísticas
+    this.stats.lastStatsUpdate = new Date();
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
-// Virtual para verificar si puede tener subcategorías
-BusinessCategorySchema.virtual("canHaveSubcategories").get(function () {
-  return this.categoryConfig?.allowSubcategories && this.categoryLevel < 5;
-});
-
-// Virtual para obtener el porcentaje de ocupación
-BusinessCategorySchema.virtual("occupancyPercentage").get(function () {
-  if (!this.categoryConfig?.maxSubcategories) return 0;
-  return Math.round(
-    (this.stats.businessCount / this.categoryConfig.maxSubcategories) * 100
-  );
-});
-
-// Virtual para verificar popularidad
-BusinessCategorySchema.virtual("isPopular").get(function () {
-  return this.stats.businessCount > 10 && this.stats.averageRating > 4.0;
+// Post-save middleware
+BusinessCategorySchema.post("save", async function (doc) {
+  if (doc.isNew) {
+    console.log(
+      `✅ Categoría creada: ${doc.categorySlug} (Nivel: ${doc.categoryLevel})`
+    );
+  }
 });
 
 // ================================
-// MÉTODOS DE INSTANCIA
+// MÉTODOS DE INSTANCIA (combinados y optimizados)
 // ================================
 
-// Método para obtener subcategorías
-BusinessCategorySchema.methods.getSubcategories = function (options = {}) {
-  const { includeInactive = false, limit = 50 } = options;
+/**
+ * Generar path de categoría automáticamente (del primer esquema)
+ */
+BusinessCategorySchema.methods.generateCategoryPath = async function () {
+  const path = [];
+  let currentCategory = this;
 
-  let query = this.constructor.find({
-    parentCategory: this._id,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
+  // Construir path hacia arriba hasta la raíz
+  while (currentCategory) {
+    path.unshift(currentCategory.categorySlug || currentCategory.categoryCode);
 
-  if (!includeInactive) {
-    query = query.where({ isActive: true });
+    if (currentCategory.parentCategory) {
+      currentCategory = await this.constructor.findById(
+        currentCategory.parentCategory
+      );
+    } else {
+      break;
+    }
   }
 
-  return query
-    .sort({ sortOrder: 1, "categoryName.original.text": 1 })
-    .limit(limit);
+  return path.join("/");
 };
 
-// Método para obtener la jerarquía completa (breadcrumb)
+/**
+ * Obtener jerarquía completa (breadcrumb) - del segundo esquema
+ */
 BusinessCategorySchema.methods.getHierarchy = async function () {
   const hierarchy = [this];
   let current = this;
@@ -417,16 +654,33 @@ BusinessCategorySchema.methods.getHierarchy = async function () {
   return hierarchy;
 };
 
-// Método para verificar si es ancestro de otra categoría
-BusinessCategorySchema.methods.isAncestorOf = async function (categoryId) {
-  const category = await this.constructor.findById(categoryId);
-  if (!category) return false;
+/**
+ * Obtener subcategorías - del segundo esquema mejorado
+ */
+BusinessCategorySchema.methods.getSubcategories = function (options = {}) {
+  const { includeInactive = false, limit = 50 } = options;
 
-  const hierarchy = await category.getHierarchy();
-  return hierarchy.some((cat) => cat._id.equals(this._id));
+  let query = this.constructor.find({
+    parentCategory: this._id,
+    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+  });
+
+  if (!includeInactive) {
+    query = query.where({ isActive: true });
+  }
+
+  return query
+    .sort({
+      sortOrder: 1,
+      displayPriority: -1,
+      "categoryName.original.text": 1,
+    })
+    .limit(limit);
 };
 
-// Método para actualizar estadísticas
+/**
+ * Actualizar estadísticas - del segundo esquema mejorado
+ */
 BusinessCategorySchema.methods.updateStats = async function () {
   const Business = mongoose.model("Business");
 
@@ -444,7 +698,7 @@ BusinessCategorySchema.methods.updateStats = async function () {
     }),
   ]);
 
-  // Calcular calificación promedio
+  // Calcular calificación promedio y popularidad
   const ratingStats = await Business.aggregate([
     {
       $match: {
@@ -457,6 +711,7 @@ BusinessCategorySchema.methods.updateStats = async function () {
       $group: {
         _id: null,
         averageRating: { $avg: "$metrics.averageRating" },
+        totalViews: { $sum: "$metrics.totalViews" },
         lastBusinessAdded: { $max: "$createdAt" },
       },
     },
@@ -470,13 +725,39 @@ BusinessCategorySchema.methods.updateStats = async function () {
     businessCount: totalCount,
     activeBusinessCount: activeCount,
     averageRating: Math.round((stats.averageRating || 0) * 10) / 10,
+    totalViews: stats.totalViews || this.stats.totalViews || 0,
     lastBusinessAdded: stats.lastBusinessAdded || this.stats.lastBusinessAdded,
+    lastStatsUpdate: new Date(),
   };
+
+  // Calcular score de popularidad (del primer esquema)
+  this.metadata.popularityScore = this.calculatePopularityScore(
+    totalCount,
+    stats.averageRating,
+    stats.totalViews
+  );
 
   return this.save();
 };
 
-// Método para generar slug único
+/**
+ * Calcular score de popularidad (del primer esquema optimizado)
+ */
+BusinessCategorySchema.methods.calculatePopularityScore = function (
+  businessCount = 0,
+  avgRating = 0,
+  totalViews = 0
+) {
+  const businessWeight = Math.min(businessCount / 10, 10); // Máximo 10 puntos
+  const ratingWeight = (avgRating || 0) * 2; // Máximo 10 puntos
+  const viewWeight = Math.min((totalViews || 0) / 1000, 10); // Máximo 10 puntos
+
+  return Math.round((businessWeight + ratingWeight + viewWeight) / 3);
+};
+
+/**
+ * Generar slug único - del segundo esquema
+ */
 BusinessCategorySchema.methods.generateUniqueSlug = async function (baseName) {
   const baseSlug = baseName
     .toLowerCase()
@@ -502,45 +783,54 @@ BusinessCategorySchema.methods.generateUniqueSlug = async function (baseName) {
   return slug;
 };
 
-// Método para agregar campo personalizado
-BusinessCategorySchema.methods.addCustomField = function (
-  fieldName,
-  fieldType,
-  options = {}
-) {
-  if (!this.categoryConfig) {
-    this.categoryConfig = { customFields: [] };
+/**
+ * Verificar disponibilidad en país (del primer esquema)
+ */
+BusinessCategorySchema.methods.isAvailableInCountry = function (countryCode) {
+  // Si hay países permitidos definidos, verificar que esté en la lista
+  if (this.geographicRestrictions.allowedCountries?.length > 0) {
+    return this.geographicRestrictions.allowedCountries.includes(countryCode);
   }
 
-  if (!this.categoryConfig.customFields) {
-    this.categoryConfig.customFields = [];
+  // Si hay países restringidos, verificar que NO esté en la lista
+  if (this.geographicRestrictions.restrictedCountries?.length > 0) {
+    return !this.geographicRestrictions.restrictedCountries.includes(
+      countryCode
+    );
   }
 
-  // Verificar si el campo ya existe
-  const existingField = this.categoryConfig.customFields.find(
-    (f) => f.fieldName === fieldName
-  );
-  if (existingField) {
-    throw new Error(`El campo personalizado '${fieldName}' ya existe`);
+  return true;
+};
+
+/**
+ * Obtener nombre en idioma específico - del primer esquema
+ */
+BusinessCategorySchema.methods.getName = function (language = "es") {
+  if (this.categoryName?.getText) {
+    return this.categoryName.getText(language);
   }
+  return this.categoryName?.original?.text || this.categorySlug;
+};
 
-  this.categoryConfig.customFields.push({
-    fieldName,
-    fieldType,
-    isRequired: options.isRequired || false,
-    options: options.selectOptions || [],
-  });
-
-  return this;
+/**
+ * Obtener descripción en idioma específico - del primer esquema
+ */
+BusinessCategorySchema.methods.getDescription = function (language = "es") {
+  if (this.description?.getText) {
+    return this.description.getText(language);
+  }
+  return this.description?.original?.text || "";
 };
 
 // ================================
-// MÉTODOS ESTÁTICOS
+// MÉTODOS ESTÁTICOS OPTIMIZADOS
 // ================================
 
-// Obtener categorías raíz
+/**
+ * Obtener categorías raíz - del segundo esquema
+ */
 BusinessCategorySchema.statics.getRootCategories = function (options = {}) {
-  const { includeInactive = false, limit = 50 } = options;
+  const { includeInactive = false, limit = 50, country = null } = options;
 
   let query = this.find({
     $or: [{ parentCategory: null }, { parentCategory: { $exists: false } }],
@@ -551,42 +841,42 @@ BusinessCategorySchema.statics.getRootCategories = function (options = {}) {
     query = query.where({ isActive: true, isPublic: true });
   }
 
+  // Aplicar restricciones geográficas si se especifica país
+  if (country) {
+    query = query.where({
+      $and: [
+        {
+          $or: [
+            { "geographicRestrictions.restrictedCountries": { $ne: country } },
+            {
+              "geographicRestrictions.restrictedCountries": { $exists: false },
+            },
+            { "geographicRestrictions.restrictedCountries": { $size: 0 } },
+          ],
+        },
+        {
+          $or: [
+            { "geographicRestrictions.allowedCountries": country },
+            { "geographicRestrictions.allowedCountries": { $exists: false } },
+            { "geographicRestrictions.allowedCountries": { $size: 0 } },
+          ],
+        },
+      ],
+    });
+  }
+
   return query
-    .sort({ sortOrder: 1, "categoryName.original.text": 1 })
+    .sort({
+      displayPriority: -1,
+      sortOrder: 1,
+      "categoryName.original.text": 1,
+    })
     .limit(limit);
 };
 
-// Obtener árbol de categorías completo
-BusinessCategorySchema.statics.getCategoryTree = async function (options = {}) {
-  const { maxDepth = 5, includeInactive = false } = options;
-
-  const buildTree = async (parentId = null, depth = 0) => {
-    if (depth >= maxDepth) return [];
-
-    let query = this.find({
-      parentCategory: parentId,
-      $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-    });
-
-    if (!includeInactive) {
-      query = query.where({ isActive: true, isPublic: true });
-    }
-
-    const categories = await query
-      .sort({ sortOrder: 1, "categoryName.original.text": 1 })
-      .lean();
-
-    for (const category of categories) {
-      category.subcategories = await buildTree(category._id, depth + 1);
-    }
-
-    return categories;
-  };
-
-  return await buildTree();
-};
-
-// Buscar categorías por texto
+/**
+ * Buscar categorías por texto - del segundo esquema mejorado
+ */
 BusinessCategorySchema.statics.searchCategories = function (
   searchText,
   options = {}
@@ -594,8 +884,8 @@ BusinessCategorySchema.statics.searchCategories = function (
   const {
     limit = 20,
     includeInactive = false,
-    language = "es",
     parentCategory = null,
+    country = null,
   } = options;
 
   let query = this.find(
@@ -618,27 +908,33 @@ BusinessCategorySchema.statics.searchCategories = function (
     query = query.where({ parentCategory });
   }
 
-  return query
-    .sort({ score: { $meta: "textScore" }, "stats.businessCount": -1 })
-    .limit(limit);
-};
+  if (country) {
+    query = query.where({
+      $and: [
+        {
+          $or: [
+            { "geographicRestrictions.restrictedCountries": { $ne: country } },
+            {
+              "geographicRestrictions.restrictedCountries": { $exists: false },
+            },
+          ],
+        },
+      ],
+    });
+  }
 
-// Obtener categorías populares
-BusinessCategorySchema.statics.getPopularCategories = function (limit = 10) {
-  return this.find({
-    isActive: true,
-    isPublic: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  })
+  return query
     .sort({
+      score: { $meta: "textScore" },
+      "metadata.popularityScore": -1,
       "stats.businessCount": -1,
-      "stats.averageRating": -1,
-      "stats.totalViews": -1,
     })
     .limit(limit);
 };
 
-// Obtener categorías destacadas
+/**
+ * Obtener categorías destacadas - del segundo esquema
+ */
 BusinessCategorySchema.statics.getFeaturedCategories = function (limit = 5) {
   return this.find({
     isFeatured: true,
@@ -646,11 +942,17 @@ BusinessCategorySchema.statics.getFeaturedCategories = function (limit = 5) {
     isPublic: true,
     $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
   })
-    .sort({ sortOrder: 1, "stats.businessCount": -1 })
+    .sort({
+      displayPriority: -1,
+      sortOrder: 1,
+      "metadata.popularityScore": -1,
+    })
     .limit(limit);
 };
 
-// Crear categorías predeterminadas del sistema
+/**
+ * Crear categorías predeterminadas del sistema - mejorado
+ */
 BusinessCategorySchema.statics.createDefaultCategories = async function () {
   const defaultCategories = [
     {
@@ -659,12 +961,35 @@ BusinessCategorySchema.statics.createDefaultCategories = async function () {
         "Restaurantes, cafeterías, bares y servicios de comida",
         "es"
       ),
+      shortDescription: createMultiLanguageContent(
+        "Lugares para comer y beber",
+        "es"
+      ),
       categorySlug: "restaurantes-comida",
-      industryCode: "REST",
-      naicsCode: "722",
-      metadata: { color: "#FF6B6B", icon: "utensils" },
+      categoryCode: "FOOD_DRINK",
+      industryCodes: {
+        customCode: "REST",
+        naicsCode: "722",
+        googleBusinessCategory: "Restaurant",
+      },
+      searchKeywords: {
+        primaryKeywords: ["restaurant", "comida", "café", "bar"],
+        tags: ["food", "beverage", "dining"],
+        seoKeywords: ["restaurante", "comida", "gastronomía"],
+      },
+      metadata: {
+        color: "#FF6B6B",
+        icon: "utensils",
+        iconLibrary: "fontawesome",
+        popularityScore: 85,
+      },
+      seo: {
+        focusKeyword: "restaurantes",
+        seoScore: 80,
+      },
       isFeatured: true,
       sortOrder: 1,
+      displayPriority: 90,
     },
     {
       categoryName: createMultiLanguageContent("Tiendas y Retail", "es"),
@@ -672,25 +997,32 @@ BusinessCategorySchema.statics.createDefaultCategories = async function () {
         "Tiendas, supermercados, centros comerciales y retail",
         "es"
       ),
+      shortDescription: createMultiLanguageContent("Compras y retail", "es"),
       categorySlug: "tiendas-retail",
-      industryCode: "RETAIL",
-      naicsCode: "44",
-      metadata: { color: "#4ECDC4", icon: "shopping-bag" },
+      categoryCode: "RETAIL",
+      industryCodes: {
+        customCode: "RETAIL",
+        naicsCode: "44",
+        googleBusinessCategory: "Store",
+      },
+      searchKeywords: {
+        primaryKeywords: ["tienda", "shopping", "retail", "compras"],
+        tags: ["shopping", "store", "retail"],
+        seoKeywords: ["tienda", "compras", "shopping"],
+      },
+      metadata: {
+        color: "#4ECDC4",
+        icon: "shopping-bag",
+        iconLibrary: "fontawesome",
+        popularityScore: 80,
+      },
+      seo: {
+        focusKeyword: "tiendas",
+        seoScore: 75,
+      },
       isFeatured: true,
       sortOrder: 2,
-    },
-    {
-      categoryName: createMultiLanguageContent("Servicios Profesionales", "es"),
-      description: createMultiLanguageContent(
-        "Abogados, contadores, consultores y servicios profesionales",
-        "es"
-      ),
-      categorySlug: "servicios-profesionales",
-      industryCode: "PROF",
-      naicsCode: "54",
-      metadata: { color: "#45B7D1", icon: "briefcase" },
-      isFeatured: true,
-      sortOrder: 3,
+      displayPriority: 85,
     },
     {
       categoryName: createMultiLanguageContent("Salud y Bienestar", "es"),
@@ -698,61 +1030,76 @@ BusinessCategorySchema.statics.createDefaultCategories = async function () {
         "Hospitales, clínicas, farmacias y servicios de salud",
         "es"
       ),
+      shortDescription: createMultiLanguageContent(
+        "Servicios médicos y de salud",
+        "es"
+      ),
       categorySlug: "salud-bienestar",
-      industryCode: "HEALTH",
-      naicsCode: "62",
-      metadata: { color: "#96CEB4", icon: "heart" },
+      categoryCode: "HEALTH",
+      industryCodes: {
+        customCode: "HEALTH",
+        naicsCode: "62",
+        googleBusinessCategory: "Medical",
+      },
+      searchKeywords: {
+        primaryKeywords: ["hospital", "clínica", "médico", "salud"],
+        tags: ["health", "medical", "healthcare"],
+        seoKeywords: ["salud", "médico", "hospital"],
+      },
+      metadata: {
+        color: "#96CEB4",
+        icon: "heart",
+        iconLibrary: "fontawesome",
+        popularityScore: 75,
+      },
+      seo: {
+        focusKeyword: "salud",
+        seoScore: 85,
+      },
+      categoryConfig: {
+        requiresVerification: true,
+        requiresDocuments: true,
+        minimumPhotos: 2,
+      },
+      isFeatured: true,
+      sortOrder: 3,
+      displayPriority: 80,
+    },
+    {
+      categoryName: createMultiLanguageContent("Servicios Profesionales", "es"),
+      description: createMultiLanguageContent(
+        "Abogados, contadores, consultores y servicios profesionales",
+        "es"
+      ),
+      shortDescription: createMultiLanguageContent(
+        "Servicios profesionales",
+        "es"
+      ),
+      categorySlug: "servicios-profesionales",
+      categoryCode: "PROFESSIONAL",
+      industryCodes: {
+        customCode: "PROF",
+        naicsCode: "54",
+        googleBusinessCategory: "Professional Service",
+      },
+      searchKeywords: {
+        primaryKeywords: ["abogado", "contador", "consultor", "profesional"],
+        tags: ["professional", "service", "consulting"],
+        seoKeywords: ["servicios profesionales", "consultoría"],
+      },
+      metadata: {
+        color: "#45B7D1",
+        icon: "briefcase",
+        iconLibrary: "fontawesome",
+        popularityScore: 70,
+      },
+      seo: {
+        focusKeyword: "servicios profesionales",
+        seoScore: 75,
+      },
       isFeatured: true,
       sortOrder: 4,
-    },
-    {
-      categoryName: createMultiLanguageContent("Entretenimiento", "es"),
-      description: createMultiLanguageContent(
-        "Cines, teatros, centros de entretenimiento y recreación",
-        "es"
-      ),
-      categorySlug: "entretenimiento",
-      industryCode: "ENT",
-      naicsCode: "71",
-      metadata: { color: "#FECA57", icon: "film" },
-      isFeatured: true,
-      sortOrder: 5,
-    },
-    {
-      categoryName: createMultiLanguageContent("Educación", "es"),
-      description: createMultiLanguageContent(
-        "Escuelas, universidades, institutos y centros educativos",
-        "es"
-      ),
-      categorySlug: "educacion",
-      industryCode: "EDU",
-      naicsCode: "61",
-      metadata: { color: "#FF9FF3", icon: "graduation-cap" },
-      sortOrder: 6,
-    },
-    {
-      categoryName: createMultiLanguageContent("Automotriz", "es"),
-      description: createMultiLanguageContent(
-        "Concesionarios, talleres, gasolineras y servicios automotrices",
-        "es"
-      ),
-      categorySlug: "automotriz",
-      industryCode: "AUTO",
-      naicsCode: "441",
-      metadata: { color: "#54A0FF", icon: "car" },
-      sortOrder: 7,
-    },
-    {
-      categoryName: createMultiLanguageContent("Tecnología", "es"),
-      description: createMultiLanguageContent(
-        "Desarrollo de software, soporte técnico y servicios de IT",
-        "es"
-      ),
-      categorySlug: "tecnologia",
-      industryCode: "TECH",
-      naicsCode: "541",
-      metadata: { color: "#5F27CD", icon: "laptop" },
-      sortOrder: 8,
+      displayPriority: 75,
     },
   ];
 
@@ -783,90 +1130,79 @@ BusinessCategorySchema.statics.createDefaultCategories = async function () {
   return createdCategories;
 };
 
-// Obtener estadísticas generales de categorías
-BusinessCategorySchema.statics.getCategoryStats = async function () {
-  const stats = await this.aggregate([
-    {
-      $match: {
-        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-      },
-    },
-    {
-      $group: {
-        _id: null,
-        totalCategories: { $sum: 1 },
-        activeCategories: {
-          $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
-        },
-        featuredCategories: {
-          $sum: { $cond: [{ $eq: ["$isFeatured", true] }, 1, 0] },
-        },
-        rootCategories: {
-          $sum: { $cond: [{ $eq: ["$categoryLevel", 0] }, 1, 0] },
-        },
-        totalBusinesses: { $sum: "$stats.businessCount" },
-        avgBusinessesPerCategory: { $avg: "$stats.businessCount" },
-      },
-    },
-  ]);
+/**
+ * Actualizar estadísticas de todas las categorías (del primer esquema)
+ */
+BusinessCategorySchema.statics.updateAllCategoryStats = async function () {
+  const categories = await this.find({ isActive: true });
 
-  return (
-    stats[0] || {
-      totalCategories: 0,
-      activeCategories: 0,
-      featuredCategories: 0,
-      rootCategories: 0,
-      totalBusinesses: 0,
-      avgBusinessesPerCategory: 0,
-    }
+  for (const category of categories) {
+    await category.updateStats();
+  }
+
+  console.log(
+    `✅ Estadísticas actualizadas para ${categories.length} categorías`
   );
 };
 
 // ================================
-// MIDDLEWARES
+// VIRTUALES OPTIMIZADOS
 // ================================
 
-// Pre-save middleware para generar categoryPath y validaciones
-BusinessCategorySchema.pre("save", async function (next) {
-  try {
-    // Generar slug si no existe
-    if (!this.categorySlug && this.categoryName?.original?.text) {
-      await this.generateUniqueSlug(this.categoryName.original.text);
-    }
-
-    // Actualizar nivel y ruta de categoría
-    if (this.parentCategory) {
-      const parent = await this.constructor.findById(this.parentCategory);
-      if (parent) {
-        this.categoryLevel = parent.categoryLevel + 1;
-        this.categoryPath = parent.categoryPath
-          ? `${parent.categoryPath}/${this.categorySlug}`
-          : this.categorySlug;
-      }
-    } else {
-      this.categoryLevel = 0;
-      this.categoryPath = this.categorySlug;
-    }
-
-    // Normalizar código de industria
-    if (this.industryCode) {
-      this.industryCode = this.industryCode.toUpperCase().trim();
-    }
-
-    next();
-  } catch (error) {
-    next(error);
-  }
+/**
+ * Virtual para verificar si es categoría raíz
+ */
+BusinessCategorySchema.virtual("isRootCategory").get(function () {
+  return !this.parentCategory && this.categoryLevel === 0;
 });
 
-// Post-save middleware para logging
-BusinessCategorySchema.post("save", function (doc, next) {
-  if (doc.isNew) {
-    console.log(
-      `📁 Categoría de empresa creada: ${doc.categorySlug} (Nivel: ${doc.categoryLevel})`
-    );
-  }
-  next();
+/**
+ * Virtual para verificar si puede tener subcategorías
+ */
+BusinessCategorySchema.virtual("canHaveSubcategories").get(function () {
+  return this.categoryConfig?.allowSubcategories && this.categoryLevel < 5;
+});
+
+/**
+ * Virtual para verificar popularidad
+ */
+BusinessCategorySchema.virtual("isPopular").get(function () {
+  return this.stats.businessCount > 10 && this.stats.averageRating > 4.0;
+});
+
+/**
+ * Virtual para obtener path como array
+ */
+BusinessCategorySchema.virtual("pathArray").get(function () {
+  return this.categoryPath ? this.categoryPath.split("/") : [this.categorySlug];
+});
+
+/**
+ * Virtual para verificar si tiene subcategorías
+ */
+BusinessCategorySchema.virtual("hasChildren").get(function () {
+  return this.childCategories?.length > 0;
+});
+
+// ================================
+// CONFIGURACIÓN ADICIONAL
+// ================================
+
+// Configurar opciones de transformación para JSON
+BusinessCategorySchema.set("toJSON", {
+  virtuals: true,
+  transform: function (doc, ret) {
+    delete ret.__v;
+
+    // Agregar información calculada
+    ret.isRootCategory = doc.isRootCategory;
+    ret.canHaveSubcategories = doc.canHaveSubcategories;
+    ret.isPopular = doc.isPopular;
+    ret.pathArray = doc.pathArray;
+    ret.hasChildren = doc.hasChildren;
+
+    return ret;
+  },
 });
 
 // ================================

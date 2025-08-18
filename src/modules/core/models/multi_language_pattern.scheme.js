@@ -1,7 +1,9 @@
 // =============================================================================
 // src/modules/core/models/multi_language_pattern.scheme.js
+// ESQUEMA MULTIIDIOMA EMPRESARIAL - VERSIÓN OPTIMIZADA
 // =============================================================================
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 /**
  * Lista de idiomas soportados por el sistema
@@ -19,23 +21,12 @@ export const SUPPORTED_LANGUAGES = [
   "ar", // Árabe
   "ru", // Ruso
   "hi", // Hindi
-  "th", // Tailandés
-  "vi", // Vietnamita
-  "pl", // Polaco
-  "nl", // Holandés
-  "sv", // Sueco
-  "no", // Noruego
-  "da", // Danés
-  "fi", // Finlandés
 ];
 
-/**
- * Idioma por defecto del sistema
- */
 export const DEFAULT_LANGUAGE = "es";
 
 /**
- * Esquema para contenido original (texto en idioma nativo del usuario)
+ * Schema para contenido original
  */
 const OriginalContentSchema = new mongoose.Schema(
   {
@@ -52,7 +43,6 @@ const OriginalContentSchema = new mongoose.Schema(
       maxlength: 5000,
       trim: true,
     },
-    // Metadatos del contenido original
     createdAt: {
       type: Date,
       default: Date.now,
@@ -74,7 +64,7 @@ const OriginalContentSchema = new mongoose.Schema(
 );
 
 /**
- * Esquema para una traducción individual
+ * Schema para traducciones individuales
  */
 const TranslationSchema = new mongoose.Schema(
   {
@@ -104,6 +94,12 @@ const TranslationSchema = new mongoose.Schema(
       max: 1,
       default: 0.8,
     },
+    qualityScore: {
+      type: Number,
+      min: 0,
+      max: 10,
+      default: 7,
+    },
     needsReview: {
       type: Boolean,
       default: false,
@@ -118,13 +114,6 @@ const TranslationSchema = new mongoose.Schema(
     },
     verifiedAt: {
       type: Date,
-    },
-    // Metadatos de calidad
-    qualityScore: {
-      type: Number,
-      min: 0,
-      max: 10,
-      default: 7,
     },
     wordCount: {
       type: Number,
@@ -151,22 +140,27 @@ const TranslationSchema = new mongoose.Schema(
       ],
       default: "general",
     },
+    // Costo de la traducción (para analytics)
+    translationCost: {
+      type: Number,
+      default: 0,
+    },
   },
   { _id: false }
 );
 
 /**
- * Esquema principal para contenido multiidioma
+ * Schema principal para contenido multiidioma
  */
 export const MultiLanguageContentSchema = new mongoose.Schema(
   {
-    // Contenido original en el idioma nativo del usuario
+    // Contenido original
     original: {
       type: OriginalContentSchema,
       required: true,
     },
 
-    // Traducciones a otros idiomas (Map: idioma -> traducción)
+    // Traducciones (Map: idioma -> traducción)
     translations: {
       type: Map,
       of: TranslationSchema,
@@ -194,6 +188,10 @@ export const MultiLanguageContentSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      maxTranslationCost: {
+        type: Number,
+        default: 10, // USD máximo por traducción
+      },
     },
 
     // Metadatos generales
@@ -202,6 +200,10 @@ export const MultiLanguageContentSchema = new mongoose.Schema(
       default: Date.now,
     },
     totalTranslations: {
+      type: Number,
+      default: 0,
+    },
+    totalTranslationCost: {
       type: Number,
       default: 0,
     },
@@ -220,6 +222,10 @@ export const MultiLanguageContentSchema = new mongoose.Schema(
           enum: ["low", "medium", "high"],
           default: "medium",
         },
+        estimatedCost: {
+          type: Number,
+          default: 0,
+        },
       },
     ],
   },
@@ -227,20 +233,22 @@ export const MultiLanguageContentSchema = new mongoose.Schema(
 );
 
 /**
- * Middleware para actualizar contadores y metadatos
+ * Middleware para actualizar metadatos automáticamente
  */
 MultiLanguageContentSchema.pre("save", function () {
-  // Actualizar contadores de palabras y caracteres para el texto original
+  // Actualizar contadores para contenido original
   if (this.original && this.original.text) {
     this.original.wordCount = this.original.text
       .split(/\s+/)
       .filter((word) => word.length > 0).length;
     this.original.characterCount = this.original.text.length;
+    this.original.lastModified = new Date();
   }
 
   // Actualizar contadores para traducciones
   if (this.translations) {
     this.totalTranslations = this.translations.size;
+    let totalCost = 0;
 
     for (const [lang, translation] of this.translations) {
       if (translation.text) {
@@ -248,37 +256,106 @@ MultiLanguageContentSchema.pre("save", function () {
           .split(/\s+/)
           .filter((word) => word.length > 0).length;
         translation.characterCount = translation.text.length;
+
+        // Actualizar hash del texto original
+        translation.sourceTextHash = this.generateTextHash(this.original.text);
+
+        // Sumar costos
+        totalCost += translation.translationCost || 0;
       }
     }
+
+    this.totalTranslationCost = totalCost;
   }
 
   this.lastUpdated = new Date();
 });
 
 /**
- * Métodos de instancia para el esquema multiidioma
+ * MÉTODOS DE INSTANCIA
+ */
+
+/**
+ * Obtener texto en idioma específico con fallback inteligente
  */
 MultiLanguageContentSchema.methods.getText = function (
-  language = DEFAULT_LANGUAGE
+  language = DEFAULT_LANGUAGE,
+  fallbackLanguages = ["en", "es"]
 ) {
   // Si se solicita el idioma original
   if (language === this.original.language) {
-    return this.original.text;
+    return {
+      text: this.original.text,
+      language: this.original.language,
+      isTranslation: false,
+      confidence: 1.0,
+    };
   }
 
-  // Si existe traducción para el idioma solicitado
+  // Si existe traducción verificada
   if (this.translations && this.translations.has(language)) {
-    return this.translations.get(language).text;
+    const translation = this.translations.get(language);
+    if (translation.text && !translation.needsReview) {
+      return {
+        text: translation.text,
+        language: language,
+        isTranslation: true,
+        confidence: translation.confidence,
+        qualityScore: translation.qualityScore,
+        isVerified: translation.isVerified,
+      };
+    }
   }
 
-  // Fallback al idioma original
-  return this.original.text;
+  // Intentar idiomas de fallback
+  for (const fallbackLang of fallbackLanguages) {
+    if (this.original.language === fallbackLang) {
+      return {
+        text: this.original.text,
+        language: this.original.language,
+        isTranslation: false,
+        confidence: 1.0,
+        isFallback: true,
+      };
+    }
+
+    if (this.translations && this.translations.has(fallbackLang)) {
+      const translation = this.translations.get(fallbackLang);
+      if (translation.text && !translation.needsReview) {
+        return {
+          text: translation.text,
+          language: fallbackLang,
+          isTranslation: true,
+          confidence: translation.confidence,
+          isFallback: true,
+        };
+      }
+    }
+  }
+
+  // Fallback final al texto original
+  return {
+    text: this.original.text,
+    language: this.original.language,
+    isTranslation: false,
+    confidence: 1.0,
+    isFallback: true,
+  };
 };
 
+/**
+ * Verificar si tiene traducción para un idioma
+ */
 MultiLanguageContentSchema.methods.hasTranslation = function (language) {
-  return this.translations && this.translations.has(language);
+  return (
+    this.original.language === language ||
+    (this.translations && this.translations.has(language))
+  );
 };
 
+/**
+ * Agregar nueva traducción
+ */
 MultiLanguageContentSchema.methods.addTranslation = function (
   language,
   text,
@@ -294,27 +371,49 @@ MultiLanguageContentSchema.methods.addTranslation = function (
     translationMethod: options.method || "ai",
     translationService: options.service || "openai",
     confidence: options.confidence || 0.8,
+    qualityScore: options.qualityScore || 7,
     needsReview: options.needsReview || false,
     context: options.context || "general",
-    qualityScore: options.qualityScore || 7,
+    translationCost: options.cost || 0,
+    sourceTextHash: this.generateTextHash(this.original.text),
   };
 
   this.translations.set(language, translation);
-  this.totalTranslations = this.translations.size;
-  this.lastUpdated = new Date();
+  this.markModified("translations");
 
   return this;
 };
 
-MultiLanguageContentSchema.methods.removeTranslation = function (language) {
-  if (this.translations && this.translations.has(language)) {
-    this.translations.delete(language);
-    this.totalTranslations = this.translations.size;
-    this.lastUpdated = new Date();
+/**
+ * Verificar si necesita actualización de traducción
+ */
+MultiLanguageContentSchema.methods.needsTranslationUpdate = function (
+  language
+) {
+  if (!this.hasTranslation(language) || this.original.language === language) {
+    return false;
   }
-  return this;
+
+  const translation = this.translations.get(language);
+  const currentHash = this.generateTextHash(this.original.text);
+
+  return translation.sourceTextHash !== currentHash;
 };
 
+/**
+ * Generar hash para detectar cambios
+ */
+MultiLanguageContentSchema.methods.generateTextHash = function (text) {
+  return crypto
+    .createHash("sha256")
+    .update(text.trim().toLowerCase())
+    .digest("hex")
+    .substring(0, 16);
+};
+
+/**
+ * Obtener idiomas disponibles
+ */
 MultiLanguageContentSchema.methods.getAvailableLanguages = function () {
   const languages = [this.original.language];
 
@@ -329,33 +428,9 @@ MultiLanguageContentSchema.methods.getAvailableLanguages = function () {
   return languages;
 };
 
-MultiLanguageContentSchema.methods.needsTranslationUpdate = function (
-  language
-) {
-  if (!this.hasTranslation(language)) {
-    return true;
-  }
-
-  const translation = this.translations.get(language);
-  const originalHash = this.generateTextHash(this.original.text);
-
-  return translation.sourceTextHash !== originalHash;
-};
-
-MultiLanguageContentSchema.methods.generateTextHash = function (text) {
-  // Función simple de hash para detectar cambios en el texto
-  let hash = 0;
-  if (text.length === 0) return hash.toString();
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; // Convertir a 32bit integer
-  }
-
-  return hash.toString();
-};
-
+/**
+ * Marcar traducción para revisión
+ */
 MultiLanguageContentSchema.methods.markTranslationForReview = function (
   language,
   reason = ""
@@ -365,10 +440,14 @@ MultiLanguageContentSchema.methods.markTranslationForReview = function (
     translation.needsReview = true;
     translation.reviewReason = reason;
     this.translations.set(language, translation);
+    this.markModified("translations");
   }
   return this;
 };
 
+/**
+ * Aprobar traducción
+ */
 MultiLanguageContentSchema.methods.approveTranslation = function (
   language,
   approvedBy
@@ -380,40 +459,23 @@ MultiLanguageContentSchema.methods.approveTranslation = function (
     translation.verifiedBy = approvedBy;
     translation.verifiedAt = new Date();
     this.translations.set(language, translation);
+    this.markModified("translations");
   }
   return this;
 };
 
 /**
- * Helper para crear campo multiidioma en otros esquemas
- * @param {boolean} required - Si el campo es requerido
- * @param {object} options - Opciones adicionales
+ * UTILIDADES ESTÁTICAS
  */
-export const createMultiLanguageField = (required = false, options = {}) => {
-  const field = {
-    type: MultiLanguageContentSchema,
-    required,
-    index: options.textIndex ? "text" : undefined,
-  };
-
-  if (options.default) {
-    field.default = options.default;
-  }
-
-  return field;
-};
 
 /**
- * Helper para crear contenido multiidioma inicial
- * @param {string} text - Texto original
- * @param {string} language - Idioma del texto original
- * @param {object} options - Opciones adicionales
+ * Crear contenido multiidioma inicial
  */
-export const createMultiLanguageContent = (
+MultiLanguageContentSchema.statics.createContent = function (
   text,
   language = DEFAULT_LANGUAGE,
   options = {}
-) => {
+) {
   return {
     original: {
       language: language,
@@ -427,19 +489,33 @@ export const createMultiLanguageContent = (
       targetLanguages: options.targetLanguages || [],
       translationPriority: options.priority || "quality",
       excludeFromTranslation: options.excludeFromTranslation || false,
+      maxTranslationCost: options.maxCost || 10,
     },
     lastUpdated: new Date(),
     totalTranslations: 0,
+    totalTranslationCost: 0,
     pendingTranslations: [],
   };
 };
 
 /**
- * Funciones de utilidad para trabajar con contenido multiidioma
+ * HELPERS DE EXPORTACIÓN
+ */
+export const createMultiLanguageField = (required = false, options = {}) => {
+  return {
+    type: MultiLanguageContentSchema,
+    required,
+    validate: options.validator,
+    index: options.textIndex ? "text" : undefined,
+  };
+};
+
+/**
+ * UTILIDADES AVANZADAS
  */
 export const MultiLanguageUtils = {
   /**
-   * Obtener el mejor texto disponible para un idioma
+   * Obtener el mejor texto disponible
    */
   getBestText(
     content,
@@ -450,12 +526,17 @@ export const MultiLanguageUtils = {
       return "";
     }
 
-    // 1. Intentar idioma solicitado - original
+    // Usar el método de instancia si está disponible
+    if (typeof content.getText === "function") {
+      const result = content.getText(requestedLanguage, fallbackLanguages);
+      return result.text;
+    }
+
+    // Fallback para objetos planos
     if (content.original.language === requestedLanguage) {
       return content.original.text;
     }
 
-    // 2. Intentar idioma solicitado - traducción
     if (content.translations && content.translations.has(requestedLanguage)) {
       const translation = content.translations.get(requestedLanguage);
       if (translation.text && !translation.needsReview) {
@@ -463,48 +544,11 @@ export const MultiLanguageUtils = {
       }
     }
 
-    // 3. Intentar idiomas de fallback
-    for (const fallbackLang of fallbackLanguages) {
-      if (content.original.language === fallbackLang) {
-        return content.original.text;
-      }
-
-      if (content.translations && content.translations.has(fallbackLang)) {
-        const translation = content.translations.get(fallbackLang);
-        if (translation.text && !translation.needsReview) {
-          return translation.text;
-        }
-      }
-    }
-
-    // 4. Fallback final al texto original
     return content.original.text;
   },
 
   /**
-   * Verificar si necesita traducción
-   */
-  needsTranslation(content, targetLanguage) {
-    if (!content || !content.original) {
-      return false;
-    }
-
-    // Si ya está en el idioma objetivo
-    if (content.original.language === targetLanguage) {
-      return false;
-    }
-
-    // Si ya tiene traducción válida
-    if (content.translations && content.translations.has(targetLanguage)) {
-      const translation = content.translations.get(targetLanguage);
-      return translation.needsReview || !translation.text;
-    }
-
-    return true;
-  },
-
-  /**
-   * Obtener estadísticas de traducción
+   * Calcular estadísticas de traducción
    */
   getTranslationStats(content) {
     if (!content || !content.original) {
@@ -513,11 +557,16 @@ export const MultiLanguageUtils = {
         completedTranslations: 0,
         pendingTranslations: 0,
         needsReview: 0,
+        totalCost: 0,
+        avgQuality: 0,
       };
     }
 
-    let completedTranslations = 1; // Contar el original
+    let completedTranslations = 1; // Contar original
     let needsReview = 0;
+    let totalCost = content.totalTranslationCost || 0;
+    let totalQuality = 10; // Original = calidad perfecta
+    let qualityCount = 1;
 
     if (content.translations) {
       for (const [lang, translation] of content.translations) {
@@ -525,6 +574,10 @@ export const MultiLanguageUtils = {
           completedTranslations++;
           if (translation.needsReview) {
             needsReview++;
+          }
+          if (translation.qualityScore) {
+            totalQuality += translation.qualityScore;
+            qualityCount++;
           }
         }
       }
@@ -537,11 +590,49 @@ export const MultiLanguageUtils = {
         ? content.pendingTranslations.length
         : 0,
       needsReview,
+      totalCost,
+      avgQuality: totalQuality / qualityCount,
+      coverage: completedTranslations / SUPPORTED_LANGUAGES.length,
     };
   },
 
   /**
-   * Validar estructura de contenido multiidioma
+   * Verificar si necesita traducción
+   */
+  needsTranslation(content, targetLanguage) {
+    if (!content || !content.original) {
+      return false;
+    }
+
+    if (content.original.language === targetLanguage) {
+      return false;
+    }
+
+    if (
+      content.translationConfig &&
+      content.translationConfig.excludeFromTranslation
+    ) {
+      return false;
+    }
+
+    if (content.translations && content.translations.has(targetLanguage)) {
+      const translation = content.translations.get(targetLanguage);
+      const currentHash = crypto
+        .createHash("sha256")
+        .update(content.original.text.trim().toLowerCase())
+        .digest("hex")
+        .substring(0, 16);
+
+      return (
+        translation.sourceTextHash !== currentHash || translation.needsReview
+      );
+    }
+
+    return true;
+  },
+
+  /**
+   * Validar estructura de contenido
    */
   validateContent(content) {
     const errors = [];
@@ -566,7 +657,6 @@ export const MultiLanguageUtils = {
       errors.push(`Idioma '${content.original.language}' no es soportado`);
     }
 
-    // Validar traducciones
     if (content.translations) {
       for (const [lang, translation] of content.translations) {
         if (!SUPPORTED_LANGUAGES.includes(lang)) {
@@ -586,7 +676,6 @@ export const MultiLanguageUtils = {
 export default {
   MultiLanguageContentSchema,
   createMultiLanguageField,
-  createMultiLanguageContent,
   MultiLanguageUtils,
   SUPPORTED_LANGUAGES,
   DEFAULT_LANGUAGE,
