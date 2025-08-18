@@ -94,6 +94,78 @@ export class UserSessionRepository extends BaseRepository {
   }
 
   /**
+   * Buscar sesión por token
+   * @param {string} sessionToken - Token de sesión
+   * @param {Object} options - Opciones de búsqueda
+   */
+  async findBySessionToken(sessionToken, options = {}) {
+    try {
+      const { includeExpired = false } = options;
+
+      let query = {
+        sessionToken,
+        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+      };
+
+      if (!includeExpired) {
+        query.expiresAt = { $gt: new Date() };
+      }
+
+      return await this.model.findOne(query).lean();
+    } catch (error) {
+      console.error("Error buscando sesión por token:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Invalidar sesión por token
+   * @param {string} sessionToken - Token de sesión
+   * @param {string} reason - Razón de invalidación
+   */
+  async invalidateSessionByToken(sessionToken, reason = "logout") {
+    try {
+      if (!sessionToken) {
+        throw new AuthError(
+          "Token de sesión requerido",
+          AuthErrorCodes.SESSION_INVALID,
+          400
+        );
+      }
+
+      // Buscar y invalidar sesión
+      const session = await this.sessionRepository.model.findOneAndUpdate(
+        {
+          sessionToken,
+          isActive: true,
+        },
+        {
+          $set: {
+            isActive: false,
+            invalidationReason: reason,
+            updatedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
+
+      if (!session) {
+        throw new AuthError(
+          "Sesión no encontrada o ya invalidada",
+          AuthErrorCodes.SESSION_NOT_FOUND,
+          404
+        );
+      }
+
+      console.log(`✅ Sesión invalidada: ${session._id} (${reason})`);
+      return { success: true, sessionId: session._id };
+    } catch (error) {
+      console.error("Error invalidando sesión por token:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Validar sesión por token
    * @param {string} sessionToken - Token de sesión
    * @param {string} deviceFingerprint - Huella del dispositivo
@@ -191,18 +263,19 @@ export class UserSessionRepository extends BaseRepository {
    * @param {string} sessionId - ID de la sesión
    * @param {string} reason - Razón de invalidación
    */
-  async invalidateSession(sessionId, reason = "manual_logout") {
+  async invalidateSession(sessionId, reason = "manual") {
     try {
-      const updateData = {
-        isActive: false,
-        invalidationReason: reason,
-        updatedAt: new Date(),
-      };
-
-      await this.model.updateOne({ _id: sessionId }, updateData);
-
-      console.log(`🔒 Sesión invalidada: ${sessionId} - Razón: ${reason}`);
-      return true;
+      return await this.model.findByIdAndUpdate(
+        sessionId,
+        {
+          $set: {
+            isActive: false,
+            invalidationReason: reason,
+            updatedAt: new Date(),
+          },
+        },
+        { new: true }
+      );
     } catch (error) {
       console.error("Error invalidando sesión:", error);
       throw error;
@@ -212,35 +285,35 @@ export class UserSessionRepository extends BaseRepository {
   /**
    * Invalidar todas las sesiones de un usuario
    * @param {string} userId - ID del usuario
+   * @param {string} reason - Razón de invalidación
    * @param {Object} options - Opciones adicionales
    */
-  async invalidateUserSessions(userId, options = {}) {
+  async invalidateUserSessions(userId, reason = "manual", options = {}) {
     try {
-      const { exceptSessionId, reason = "logout_all_devices" } = options;
+      const { session, excludeSessionId } = options;
 
-      const filter = {
+      let query = {
         userId: new Types.ObjectId(userId),
         isActive: true,
       };
 
-      if (exceptSessionId) {
-        filter._id = { $ne: new Types.ObjectId(exceptSessionId) };
+      if (excludeSessionId) {
+        query._id = { $ne: new Types.ObjectId(excludeSessionId) };
       }
 
-      const result = await this.model.updateMany(
-        filter,
-        {
-          isActive: false,
-          invalidationReason: reason,
-          updatedAt: new Date(),
-        },
-        options
-      );
+      const updateOptions = { session };
 
-      console.log(
-        `🔒 ${result.modifiedCount} sesiones invalidadas para usuario: ${userId}`
+      return await this.model.updateMany(
+        query,
+        {
+          $set: {
+            isActive: false,
+            invalidationReason: reason,
+            updatedAt: new Date(),
+          },
+        },
+        updateOptions
       );
-      return result.modifiedCount;
     } catch (error) {
       console.error("Error invalidando sesiones de usuario:", error);
       throw error;
@@ -251,41 +324,36 @@ export class UserSessionRepository extends BaseRepository {
    * Marcar actividad sospechosa
    * @param {string} sessionId - ID de la sesión
    * @param {string} activityType - Tipo de actividad
-   * @param {string} description - Descripción
-   * @param {string} severity - Severidad
+   * @param {Object} details - Detalles de la actividad
    */
   async flagSuspiciousActivity(
     sessionId,
     activityType,
-    description,
+    details = {},
     severity = "medium"
   ) {
     try {
       const suspiciousActivity = {
         activityType,
-        description,
+        description:
+          details.description || `Actividad sospechosa: ${activityType}`,
         timestamp: new Date(),
-        severity,
+        severity: details.severity || severity,
         resolved: false,
+        details,
       };
 
-      const updateData = {
-        $push: { suspiciousActivity },
-      };
-
-      // Si es actividad de alta severidad, comprometer la sesión
-      if (severity === "high") {
-        updateData.isCompromised = true;
-        updateData.isActive = false;
-        updateData.invalidationReason = `Suspicious activity: ${activityType}`;
-      }
-
-      await this.model.updateOne({ _id: sessionId }, updateData);
-
-      console.log(
-        `🚨 Actividad sospechosa marcada: ${sessionId} - ${activityType} (${severity})`
+      return await this.model.findByIdAndUpdate(
+        sessionId,
+        {
+          $push: { suspiciousActivity },
+          $set: {
+            isCompromised: details.autoBlock || false,
+            updatedAt: new Date(),
+          },
+        },
+        { new: true }
       );
-      return true;
     } catch (error) {
       console.error("Error marcando actividad sospechosa:", error);
       throw error;
@@ -359,28 +427,35 @@ export class UserSessionRepository extends BaseRepository {
   /**
    * Actualizar última actividad de sesión
    * @param {string} sessionId - ID de la sesión
-   * @param {string} ipAddress - IP actual
+   * @param {Object} activityData - Datos de actividad
    */
-  async updateLastActivity(sessionId, ipAddress) {
+  async updateLastActivity(sessionId, activityData = {}) {
     try {
+      const { ipAddress, userAgent } = activityData;
+
       const updateData = {
         lastAccessedAt: new Date(),
+        updatedAt: new Date(),
       };
 
-      // Si la IP cambió, actualizar
-      if (ipAddress) {
+      // Actualizar IP si cambió (para tracking)
+      if (ipAddress && ipAddress !== "unknown") {
         updateData.ipAddress = ipAddress;
       }
 
-      await this.model.updateOne({ _id: sessionId }, updateData);
+      return await this.model.findByIdAndUpdate(
+        sessionId,
+        { $set: updateData },
+        { new: true }
+      );
     } catch (error) {
-      console.error("Error actualizando última actividad:", error);
+      console.error("Error actualizando actividad de sesión:", error);
       throw error;
     }
   }
 
   /**
-   * Obtener sesiones activas de usuario
+   * Obtener sesiones activas de un usuario
    * @param {string} userId - ID del usuario
    * @param {Object} options - Opciones de filtrado
    */
@@ -388,23 +463,22 @@ export class UserSessionRepository extends BaseRepository {
     try {
       const { includeCompromised = false, limit = 10 } = options;
 
-      const filter = {
+      let query = {
         userId: new Types.ObjectId(userId),
         isActive: true,
         expiresAt: { $gt: new Date() },
+        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
       };
 
       if (!includeCompromised) {
-        filter.isCompromised = false;
+        query.isCompromised = { $ne: true };
       }
 
-      const sessions = await this.model
-        .find(filter)
+      return await this.model
+        .find(query)
         .sort({ lastAccessedAt: -1 })
         .limit(limit)
         .lean();
-
-      return sessions.map((session) => this.sanitizeSessionData(session));
     } catch (error) {
       console.error("Error obteniendo sesiones activas:", error);
       throw error;
@@ -526,18 +600,28 @@ export class UserSessionRepository extends BaseRepository {
    * @param {string} userAgent - User-Agent string
    */
   parseUserAgent(userAgent) {
-    // Implementación básica - en producción usar librería como 'ua-parser-js'
-    const isMobile = /Mobile|Android|iPhone|iPad/.test(userAgent);
+    if (!userAgent) {
+      return {
+        browser: "Unknown",
+        os: "Unknown",
+        device: "Unknown",
+        isMobile: false,
+        isTablet: false,
+      };
+    }
+
+    const isMobile = /mobile|android|iphone/i.test(userAgent);
+    const isTablet = /tablet|ipad/i.test(userAgent);
 
     let browser = "Unknown";
     let os = "Unknown";
-    let device = isMobile ? "Mobile" : "Desktop";
 
     // Detectar navegador
     if (userAgent.includes("Chrome")) browser = "Chrome";
     else if (userAgent.includes("Firefox")) browser = "Firefox";
     else if (userAgent.includes("Safari")) browser = "Safari";
     else if (userAgent.includes("Edge")) browser = "Edge";
+    else if (userAgent.includes("Opera")) browser = "Opera";
 
     // Detectar OS
     if (userAgent.includes("Windows")) os = "Windows";
@@ -549,10 +633,10 @@ export class UserSessionRepository extends BaseRepository {
     return {
       browser,
       os,
-      device,
+      device: isTablet ? "tablet" : isMobile ? "mobile" : "desktop",
       isMobile,
-      screenResolution: "Unknown", // Se puede obtener del frontend
-      timezone: "Unknown", // Se puede obtener del frontend
+      isTablet,
+      userAgent,
     };
   }
 
@@ -562,17 +646,36 @@ export class UserSessionRepository extends BaseRepository {
    */
   async getLocationFromIP(ipAddress) {
     try {
-      // En producción, usar servicio como MaxMind GeoIP2 o similar
-      // Por ahora retornamos datos básicos
+      // Implementación básica - en producción usar servicio como MaxMind
+      if (
+        !ipAddress ||
+        ipAddress === "unknown" ||
+        ipAddress.startsWith("127.") ||
+        ipAddress.startsWith("192.168.")
+      ) {
+        return {
+          country: "Unknown",
+          city: "Unknown",
+          coordinates: null,
+          isVpnDetected: false,
+        };
+      }
+
+      // TODO: Integrar con servicio de geolocalización real
       return {
-        country: null,
-        city: null,
+        country: "Unknown",
+        city: "Unknown",
         coordinates: null,
         isVpnDetected: false,
       };
     } catch (error) {
-      console.error("Error obteniendo ubicación desde IP:", error);
-      return null;
+      console.error("Error obteniendo ubicación:", error);
+      return {
+        country: "Unknown",
+        city: "Unknown",
+        coordinates: null,
+        isVpnDetected: false,
+      };
     }
   }
 

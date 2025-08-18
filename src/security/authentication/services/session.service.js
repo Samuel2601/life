@@ -115,40 +115,101 @@ export class SessionService {
   }
 
   /**
-   * Terminar todas las sesiones excepto la actual
+   * Terminar todas las otras sesiones del usuario
    * @param {string} userId - ID del usuario
-   * @param {string} currentSessionId - ID de la sesión actual a conservar
+   * @param {string} currentSessionId - ID de la sesión actual a preservar
    * @param {Object} requestInfo - Información del request
    */
   async terminateOtherSessions(userId, currentSessionId, requestInfo) {
     try {
-      const { ipAddress } = requestInfo;
+      const { ipAddress, userAgent } = requestInfo;
 
-      const invalidatedCount =
-        await this.sessionRepository.invalidateUserSessions(userId, {
-          exceptSessionId: currentSessionId,
-          reason: "terminated_other_sessions",
-        });
+      // Invalidar todas las sesiones excepto la actual
+      const result = await this.sessionRepository.model.updateMany(
+        {
+          userId,
+          _id: { $ne: currentSessionId },
+          isActive: true,
+        },
+        {
+          $set: {
+            isActive: false,
+            invalidationReason: "terminated_by_user_other_sessions",
+            updatedAt: new Date(),
+          },
+        }
+      );
 
       console.log(
-        `✅ Otras sesiones terminadas: ${invalidatedCount} (Usuario: ${userId})`
+        `✅ ${result.modifiedCount} sesiones terminadas para usuario ${userId}`
       );
 
       return {
-        success: true,
-        terminatedSessions: invalidatedCount,
-        message:
-          invalidatedCount > 0
-            ? `${invalidatedCount} sesiones terminadas exitosamente`
-            : "No hay otras sesiones activas",
+        terminatedSessions: result.modifiedCount,
+        currentSessionPreserved: true,
       };
     } catch (error) {
       console.error("Error terminando otras sesiones:", error);
       throw new AuthError(
         "Error terminando otras sesiones",
-        AuthErrorCodes.SESSION_TERMINATION_FAILED,
+        AuthErrorCodes.SESSION_RETRIEVAL_FAILED,
         500
       );
+    }
+  }
+
+  /**
+   * Limpiar sesiones expiradas del sistema
+   * @param {Object} options - Opciones de limpieza
+   */
+  async cleanupExpiredSessions(options = {}) {
+    try {
+      const { batchSize = 1000 } = options;
+      const currentTime = new Date();
+
+      // Marcar sesiones expiradas como inactivas
+      const expiredSessions = await this.sessionRepository.model.updateMany(
+        {
+          $or: [
+            { expiresAt: { $lt: currentTime } },
+            {
+              isActive: true,
+              lastAccessedAt: {
+                $lt: new Date(currentTime - 7 * 24 * 60 * 60 * 1000),
+              },
+            }, // 7 días sin actividad
+          ],
+          isActive: true,
+        },
+        {
+          $set: {
+            isActive: false,
+            invalidationReason: "expired_auto_cleanup",
+            updatedAt: currentTime,
+          },
+        },
+        { limit: batchSize }
+      );
+
+      // Eliminar físicamente sesiones muy antiguas (opcional)
+      const veryOldDate = new Date(currentTime - 90 * 24 * 60 * 60 * 1000); // 90 días
+      const deletedSessions = await this.sessionRepository.model.deleteMany({
+        updatedAt: { $lt: veryOldDate },
+        isActive: false,
+      });
+
+      console.log(
+        `🧹 Sesiones limpiadas: ${expiredSessions.modifiedCount} expiradas, ${deletedSessions.deletedCount} eliminadas`
+      );
+
+      return {
+        expiredSessions: expiredSessions.modifiedCount,
+        deletedSessions: deletedSessions.deletedCount,
+        cleanupTime: currentTime,
+      };
+    } catch (error) {
+      console.error("Error limpiando sesiones expiradas:", error);
+      throw error;
     }
   }
 
@@ -337,9 +398,8 @@ export class SessionService {
         },
       ];
 
-      const suspiciousActivities = await this.sessionRepository.model.aggregate(
-        pipeline
-      );
+      const suspiciousActivities =
+        await this.sessionRepository.model.aggregate(pipeline);
 
       // Obtener resumen de estadísticas
       const statsPipeline = [
@@ -494,9 +554,8 @@ export class SessionService {
       );
 
       // Si se redujo el límite de sesiones concurrentes, invalidar las más antiguas
-      const activeSessions = await this.sessionRepository.getUserActiveSessions(
-        userId
-      );
+      const activeSessions =
+        await this.sessionRepository.getUserActiveSessions(userId);
       if (activeSessions.length > maxConcurrentSessions) {
         const sessionsToInvalidate = activeSessions
           .sort(
@@ -535,84 +594,157 @@ export class SessionService {
   }
 
   /**
-   * Obtener estadísticas detalladas de sesiones
-   * @param {string} userId - ID del usuario
-   * @param {Object} options - Opciones de período
+   * Obtener estadísticas de sesiones
+   * @param {Object} filters - Filtros opcionales
    */
-  async getSessionStatistics(userId, options = {}) {
+  async getSessionStats(filters = {}) {
     try {
-      const {
-        dateFrom = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 días atrás
-        dateTo = new Date(),
-      } = options;
+      const { userId, timeRange = 30 } = filters;
+      const startDate = new Date(Date.now() - timeRange * 24 * 60 * 60 * 1000);
 
-      const stats = await this.sessionRepository.getSessionStats(userId);
-
-      // Estadísticas por período
-      const periodStats = await this.sessionRepository.model.aggregate([
+      const pipeline = [
         {
           $match: {
-            userId: new Types.ObjectId(userId),
-            createdAt: { $gte: dateFrom, $lte: dateTo },
+            createdAt: { $gte: startDate },
+            ...(userId && { userId: new Types.ObjectId(userId) }),
           },
         },
         {
           $group: {
-            _id: {
-              $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+            _id: null,
+            totalSessions: { $sum: 1 },
+            activeSessions: {
+              $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
             },
-            sessionsCreated: { $sum: 1 },
-            avgDuration: {
+            expiredSessions: {
+              $sum: { $cond: [{ $lt: ["$expiresAt", new Date()] }, 1, 0] },
+            },
+            compromisedSessions: {
+              $sum: { $cond: [{ $eq: ["$isCompromised", true] }, 1, 0] },
+            },
+            averageSessionDuration: {
               $avg: {
-                $subtract: ["$lastAccessedAt", "$createdAt"],
+                $subtract: [
+                  { $ifNull: ["$lastAccessedAt", "$createdAt"] },
+                  "$createdAt",
+                ],
               },
             },
-          },
-        },
-        {
-          $sort: { _id: 1 },
-        },
-      ]);
-
-      // Patrones de uso por hora del día
-      const hourlyPatterns = await this.sessionRepository.model.aggregate([
-        {
-          $match: {
-            userId: new Types.ObjectId(userId),
-            createdAt: { $gte: dateFrom, $lte: dateTo },
-          },
-        },
-        {
-          $group: {
-            _id: {
-              $hour: "$createdAt",
+            deviceTypes: {
+              $addToSet: "$deviceInfo.device",
             },
-            sessionCount: { $sum: 1 },
+            browsers: {
+              $addToSet: "$deviceInfo.browser",
+            },
           },
         },
         {
-          $sort: { _id: 1 },
+          $project: {
+            _id: 0,
+            totalSessions: 1,
+            activeSessions: 1,
+            expiredSessions: 1,
+            compromisedSessions: 1,
+            inactiveSessions: {
+              $subtract: ["$totalSessions", "$activeSessions"],
+            },
+            averageSessionDurationHours: {
+              $divide: ["$averageSessionDuration", 1000 * 60 * 60],
+            },
+            deviceTypes: 1,
+            browsers: 1,
+          },
         },
-      ]);
+      ];
 
-      return {
-        general: stats.general,
-        byDevice: stats.byDevice,
-        byLocation: stats.byLocation,
-        dailyActivity: periodStats,
-        hourlyPatterns,
-        period: {
-          from: dateFrom,
-          to: dateTo,
+      const stats = await this.sessionRepository.model.aggregate(pipeline);
+
+      return (
+        stats[0] || {
+          totalSessions: 0,
+          activeSessions: 0,
+          expiredSessions: 0,
+          compromisedSessions: 0,
+          inactiveSessions: 0,
+          averageSessionDurationHours: 0,
+          deviceTypes: [],
+          browsers: [],
+        }
+      );
+    } catch (error) {
+      console.error("Error obteniendo estadísticas de sesiones:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar actividad sospechosa en sesiones
+   * @param {string} userId - ID del usuario
+   * @param {Object} options - Opciones de análisis
+   */
+  async analyzeSuspiciousActivity(userId, options = {}) {
+    try {
+      const { timeWindow = 24 } = options; // horas
+      const startTime = new Date(Date.now() - timeWindow * 60 * 60 * 1000);
+
+      const sessions = await this.sessionRepository.model
+        .find({
+          userId,
+          createdAt: { $gte: startTime },
+        })
+        .sort({ createdAt: -1 });
+
+      const analysis = {
+        suspiciousIndicators: [],
+        riskLevel: "low",
+        recommendations: [],
+        sessionAnalysis: {
+          totalSessions: sessions.length,
+          activeSessions: sessions.filter((s) => s.isActive).length,
+          compromisedSessions: sessions.filter((s) => s.isCompromised).length,
         },
       };
-    } catch (error) {
-      console.error("Error obteniendo estadísticas de sesión:", error);
-      throw new AuthError(
-        "Error obteniendo estadísticas de sesión",
-        AuthErrorCodes.SESSION_STATS_FAILED,
-        500
+
+      // Análisis de múltiples ubicaciones
+      const uniqueIPs = new Set(sessions.map((s) => s.ipAddress));
+      if (uniqueIPs.size > 3) {
+        analysis.suspiciousIndicators.push("multiple_locations");
+        analysis.riskLevel = "medium";
+        analysis.recommendations.push("Verificar ubicaciones de acceso");
+      }
+
+      // Análisis de múltiples dispositivos
+      const uniqueFingerprints = new Set(
+        sessions.map((s) => s.deviceFingerprint)
       );
+      if (uniqueFingerprints.size > 2) {
+        analysis.suspiciousIndicators.push("multiple_devices");
+        analysis.riskLevel = "medium";
+        analysis.recommendations.push("Verificar dispositivos utilizados");
+      }
+
+      // Análisis de frecuencia de sesiones
+      if (sessions.length > 10) {
+        analysis.suspiciousIndicators.push("high_frequency");
+        analysis.riskLevel = "high";
+        analysis.recommendations.push("Posible actividad automatizada");
+      }
+
+      // Análisis de cambios de fingerprint
+      const fingerprintChanges = sessions.reduce((acc, session) => {
+        return acc + (session.fingerprintChanges?.length || 0);
+      }, 0);
+
+      if (fingerprintChanges > 5) {
+        analysis.suspiciousIndicators.push("frequent_fingerprint_changes");
+        analysis.riskLevel = "high";
+        analysis.recommendations.push("Dispositivo posiblemente comprometido");
+      }
+
+      return analysis;
+    } catch (error) {
+      console.error("Error analizando actividad sospechosa:", error);
+      throw error;
     }
   }
 
@@ -690,14 +822,20 @@ export class SessionService {
    * @param {Date} lastAccessedAt - Fecha de último acceso
    */
   formatLastActivity(lastAccessedAt) {
+    if (!lastAccessedAt) return "Nunca";
+
     const now = new Date();
-    const diffMs = now - new Date(lastAccessedAt);
+    const diffMs = now - lastAccessedAt;
     const diffMinutes = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
     if (diffMinutes < 1) return "Ahora mismo";
     if (diffMinutes < 60) return `Hace ${diffMinutes} minutos`;
-    if (diffMinutes < 1440) return `Hace ${Math.floor(diffMinutes / 60)} horas`;
-    return `Hace ${Math.floor(diffMinutes / 1440)} días`;
+    if (diffHours < 24) return `Hace ${diffHours} horas`;
+    if (diffDays < 7) return `Hace ${diffDays} días`;
+
+    return lastAccessedAt.toLocaleDateString();
   }
 
   /**
@@ -707,12 +845,8 @@ export class SessionService {
   formatDeviceSummary(deviceInfo) {
     if (!deviceInfo) return "Dispositivo desconocido";
 
-    const {
-      browser = "Desconocido",
-      os = "Desconocido",
-      device = "Desconocido",
-    } = deviceInfo;
-    return `${browser} en ${os} (${device})`;
+    const { browser, os, device } = deviceInfo;
+    return `${browser || "Navegador"} en ${os || "SO"} (${device || "dispositivo"})`;
   }
 
   /**
@@ -725,6 +859,7 @@ export class SessionService {
     const { city, country } = location;
     if (city && country) return `${city}, ${country}`;
     if (country) return country;
+
     return "Ubicación desconocida";
   }
 

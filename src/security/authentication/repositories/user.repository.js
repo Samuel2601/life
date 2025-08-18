@@ -94,25 +94,71 @@ export class UserRepository extends BaseRepository {
    */
   async findByEmail(email, options = {}) {
     try {
-      const { includePassword = false, includeDeleted = false } = options;
+      const { includePassword = false, session } = options;
 
       let query = this.model.findOne({
         email: email.toLowerCase(),
+        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
       });
 
-      if (!includeDeleted) {
-        query = query.where({
-          $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-        });
+      if (session) {
+        query = query.session(session);
       }
 
-      if (includePassword) {
-        query = query.select("+passwordHash");
+      if (!includePassword) {
+        query = query.select("-passwordHash");
       }
 
       return await query.lean();
     } catch (error) {
       console.error("Error buscando usuario por email:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Actualizar intentos de login
+   * @param {string} userId - ID del usuario
+   * @param {boolean} success - Si el login fue exitoso
+   */
+  async updateLoginAttempts(userId, success) {
+    try {
+      if (success) {
+        // Reset intentos y actualizar estadísticas
+        return await this.model.findByIdAndUpdate(
+          userId,
+          {
+            $unset: { loginAttempts: 1, lockUntil: 1 },
+            $set: {
+              lastLoginAt: new Date(),
+              updatedAt: new Date(),
+            },
+            $inc: { "metadata.totalLogins": 1 },
+          },
+          { new: true }
+        );
+      } else {
+        // Incrementar intentos fallidos
+        const user = await this.model.findById(userId);
+        if (!user) return null;
+
+        const attempts = (user.loginAttempts || 0) + 1;
+        const updates = {
+          loginAttempts: attempts,
+          updatedAt: new Date(),
+        };
+
+        // Bloquear cuenta si excede intentos máximos
+        if (attempts >= 5) {
+          updates.lockUntil = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 horas
+        }
+
+        return await this.model.findByIdAndUpdate(userId, updates, {
+          new: true,
+        });
+      }
+    } catch (error) {
+      console.error("Error actualizando intentos de login:", error);
       throw error;
     }
   }

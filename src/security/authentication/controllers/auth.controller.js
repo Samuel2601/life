@@ -3,7 +3,11 @@
 // =============================================================================
 import { AuthService } from "../services/auth.service.js";
 import { SessionService } from "../services/session.service.js";
-import { AuthUtils } from "../authentication.index.js";
+import {
+  AuthUtils,
+  AuthError,
+  AuthErrorCodes,
+} from "../authentication.index.js";
 
 export class AuthController {
   constructor() {
@@ -46,27 +50,48 @@ export class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
         sameSite: "strict",
-        maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000, // 30 días o 1 día
+        maxAge: rememberMe ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000, // 30 días o 8 horas
+        path: "/",
       });
 
-      res.json({
+      // Respuesta exitosa (sin tokens sensibles)
+      res.status(200).json({
         success: true,
         message: "Login exitoso",
-        user: loginResult.user,
-        expiresAt: loginResult.expiresAt,
+        user: {
+          id: loginResult.user.id,
+          email: loginResult.user.email,
+          profile: loginResult.user.profile,
+          roles: loginResult.user.roles,
+          preferences: loginResult.user.preferences,
+        },
+        session: {
+          expiresAt: loginResult.session.expiresAt,
+          rememberMe: loginResult.session.rememberMe,
+        },
       });
     } catch (error) {
       console.error("Error en login:", error);
-      res.status(error.statusCode || 500).json({
+
+      // Manejar errores específicos de autenticación
+      if (error instanceof AuthError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+          code: error.code,
+        });
+      }
+
+      // Error genérico
+      res.status(500).json({
         success: false,
-        error: error.message || "Error interno del servidor",
-        code: error.code,
+        error: "Error interno del servidor",
       });
     }
   }
 
   /**
-   * Registro de usuario
+   * Registro de nuevo usuario
    */
   async register(req, res) {
     try {
@@ -76,15 +101,31 @@ export class AuthController {
         firstName,
         lastName,
         preferredLanguage = "es",
+        timezone = "America/Lima",
       } = req.body;
 
       // Validaciones básicas
       if (!email || !password || !firstName || !lastName) {
         return res.status(400).json({
           success: false,
-          error: "Todos los campos son requeridos",
+          error: "Email, contraseña, nombre y apellido son requeridos",
         });
       }
+
+      // Preparar datos de registro
+      const registrationData = {
+        email: email.toLowerCase(),
+        password,
+        profile: {
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+        },
+        preferences: {
+          language: preferredLanguage,
+          timezone,
+        },
+        registrationSource: "web",
+      };
 
       // Preparar datos del request
       const requestInfo = {
@@ -93,35 +134,49 @@ export class AuthController {
         deviceFingerprint: AuthUtils.generateDeviceFingerprint(req),
       };
 
-      // Preparar datos del usuario
-      const userData = {
-        email,
-        password,
-        profile: {
-          firstName,
-          lastName,
-        },
-        preferredLanguage,
-      };
-
       // Realizar registro
       const registerResult = await this.authService.register(
-        userData,
+        registrationData,
         requestInfo
       );
 
+      // Configurar cookie de sesión automática
+      res.cookie("sessionToken", registerResult.sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 8 * 60 * 60 * 1000, // 8 horas por defecto
+        path: "/",
+      });
+
+      // Respuesta exitosa
       res.status(201).json({
         success: true,
         message: "Usuario registrado exitosamente",
-        user: registerResult.user,
-        requiresEmailVerification: true,
+        user: {
+          id: registerResult.user.id,
+          email: registerResult.user.email,
+          profile: registerResult.user.profile,
+          isEmailVerified: registerResult.user.isEmailVerified,
+        },
+        session: {
+          expiresAt: registerResult.session.expiresAt,
+        },
       });
     } catch (error) {
       console.error("Error en registro:", error);
-      res.status(error.statusCode || 500).json({
+
+      if (error instanceof AuthError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+          code: error.code,
+        });
+      }
+
+      res.status(500).json({
         success: false,
-        error: error.message || "Error interno del servidor",
-        code: error.code,
+        error: "Error interno del servidor",
       });
     }
   }
@@ -134,24 +189,36 @@ export class AuthController {
       const sessionToken = req.cookies?.sessionToken;
 
       if (sessionToken) {
-        await this.sessionService.invalidateSession(
-          sessionToken,
-          "user_logout"
-        );
+        // Invalidar sesión en el servidor
+        try {
+          await this.sessionService.invalidateSessionByToken(sessionToken);
+        } catch (sessionError) {
+          console.error("Error invalidando sesión:", sessionError);
+          // Continuar con logout aunque falle la invalidación
+        }
       }
 
       // Limpiar cookie
-      res.clearCookie("sessionToken");
+      res.clearCookie("sessionToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: "Logout exitoso",
       });
     } catch (error) {
       console.error("Error en logout:", error);
-      res.status(500).json({
-        success: false,
-        error: "Error interno del servidor",
+
+      // Aunque haya error, limpiar cookie
+      res.clearCookie("sessionToken");
+
+      res.status(200).json({
+        success: true,
+        message: "Logout realizado",
       });
     }
   }
@@ -166,58 +233,102 @@ export class AuthController {
       if (!sessionToken) {
         return res.status(401).json({
           success: false,
+          authenticated: false,
           error: "No hay sesión activa",
         });
       }
 
+      // Preparar información del request
       const requestInfo = {
         ipAddress: AuthUtils.getRealIP(req),
         userAgent: req.get("User-Agent") || "Unknown",
         deviceFingerprint: AuthUtils.generateDeviceFingerprint(req),
       };
 
-      const sessionValidation = await this.sessionService.validateSession(
+      // Validar sesión
+      const validation = await this.authService.validateSession(
         sessionToken,
         requestInfo
       );
 
-      res.json({
+      if (!validation.isValid) {
+        // Limpiar cookie inválida
+        res.clearCookie("sessionToken");
+
+        return res.status(401).json({
+          success: false,
+          authenticated: false,
+          error: validation.reason || "Sesión inválida",
+        });
+      }
+
+      // Sesión válida
+      res.status(200).json({
         success: true,
-        user: sessionValidation.user,
+        authenticated: true,
+        user: {
+          id: validation.user.id,
+          email: validation.user.email,
+          profile: validation.user.profile,
+          roles: validation.user.roles,
+          preferences: validation.user.preferences,
+        },
         session: {
-          isActive: sessionValidation.session.isActive,
-          expiresAt: sessionValidation.session.expiresAt,
-          lastAccessedAt: sessionValidation.session.lastAccessedAt,
+          expiresAt: validation.session.expiresAt,
+          lastAccessedAt: validation.session.lastAccessedAt,
         },
       });
     } catch (error) {
       console.error("Error verificando autenticación:", error);
-      res.status(error.statusCode || 401).json({
+
+      res.status(500).json({
         success: false,
-        error: error.message || "Sesión inválida",
+        authenticated: false,
+        error: "Error verificando sesión",
       });
     }
   }
 
   /**
-   * Verificar email
+   * Verificar email con token
    */
   async verifyEmail(req, res) {
     try {
       const { token } = req.params;
 
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          error: "Token de verificación requerido",
+        });
+      }
+
+      // Verificar email
       const result = await this.authService.verifyEmail(token);
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: "Email verificado exitosamente",
-        user: result.user,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          isEmailVerified: result.user.isEmailVerified,
+        },
       });
     } catch (error) {
       console.error("Error verificando email:", error);
-      res.status(error.statusCode || 400).json({
+
+      if (error instanceof AuthError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+          code: error.code,
+        });
+      }
+
+      res.status(500).json({
         success: false,
-        error: error.message || "Token de verificación inválido",
+        error: "Error verificando email",
       });
     }
   }
@@ -236,48 +347,82 @@ export class AuthController {
         });
       }
 
-      await this.authService.requestPasswordReset(email);
+      // Preparar información del request
+      const requestInfo = {
+        ipAddress: AuthUtils.getRealIP(req),
+        userAgent: req.get("User-Agent") || "Unknown",
+      };
 
-      res.json({
+      // Solicitar reset (siempre respuesta exitosa por seguridad)
+      await this.authService.requestPasswordReset(email, requestInfo);
+
+      res.status(200).json({
         success: true,
         message:
           "Si el email existe, recibirás instrucciones para resetear tu contraseña",
       });
     } catch (error) {
-      console.error("Error solicitando reset de contraseña:", error);
-      res.status(500).json({
-        success: false,
-        error: "Error interno del servidor",
+      console.error("Error solicitando reset:", error);
+
+      // Siempre respuesta exitosa por seguridad
+      res.status(200).json({
+        success: true,
+        message:
+          "Si el email existe, recibirás instrucciones para resetear tu contraseña",
       });
     }
   }
 
   /**
-   * Resetear contraseña
+   * Resetear contraseña con token
    */
   async resetPassword(req, res) {
     try {
       const { token } = req.params;
       const { newPassword } = req.body;
 
-      if (!newPassword) {
+      if (!token || !newPassword) {
         return res.status(400).json({
           success: false,
-          error: "Nueva contraseña es requerida",
+          error: "Token y nueva contraseña son requeridos",
         });
       }
 
-      await this.authService.resetPassword(token, newPassword);
+      // Preparar información del request
+      const requestInfo = {
+        ipAddress: AuthUtils.getRealIP(req),
+        userAgent: req.get("User-Agent") || "Unknown",
+      };
 
-      res.json({
+      // Resetear contraseña
+      const result = await this.authService.resetPassword(
+        token,
+        newPassword,
+        requestInfo
+      );
+
+      res.status(200).json({
         success: true,
         message: "Contraseña actualizada exitosamente",
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+        },
       });
     } catch (error) {
       console.error("Error reseteando contraseña:", error);
-      res.status(error.statusCode || 400).json({
+
+      if (error instanceof AuthError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          error: error.message,
+          code: error.code,
+        });
+      }
+
+      res.status(500).json({
         success: false,
-        error: error.message || "Token de reset inválido",
+        error: "Error reseteando contraseña",
       });
     }
   }
