@@ -1,8 +1,10 @@
 // =============================================================================
-// src/modules/authentication/services/auth.service.js
+// src/modules/authentication/services/auth.service.js - VERSIÓN MEJORADA
+// Aprovecha al 100% las funcionalidades de tus repositories y schemas existentes
 // =============================================================================
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
 import { UserRepository } from "../repositories/user.repository.js";
 import { UserSessionRepository } from "../repositories/user_session.repository.js";
 import { RoleRepository } from "../repositories/role.repository.js";
@@ -22,8 +24,12 @@ export class AuthService {
       process.env.JWT_SECRET || "default_secret_change_in_production";
   }
 
+  // =============================================================================
+  // MÉTODOS PRINCIPALES DE AUTENTICACIÓN (MEJORADOS)
+  // =============================================================================
+
   /**
-   * Registrar nuevo usuario
+   * Registrar nuevo usuario con funcionalidades empresariales completas
    * @param {Object} registrationData - Datos de registro
    * @param {Object} requestInfo - Información del request
    */
@@ -36,17 +42,19 @@ export class AuthService {
             password,
             profile,
             preferences = {},
+            businessPreferences = {},
             registrationSource = "web",
             oauthProvider = null,
             oauthData = null,
+            companyContext = null,
           } = registrationData;
 
-          const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
+          const { ipAddress, userAgent } = requestInfo;
 
-          // Validar datos básicos
-          this.validateRegistrationData(registrationData);
+          // Validar datos básicos (método mejorado)
+          await this.validateRegistrationDataEnhanced(registrationData);
 
-          // Verificar si el email ya existe
+          // Verificar email único usando método del repository
           const existingUser = await this.userRepository.findByEmail(email);
           if (existingUser) {
             throw new AuthError(
@@ -56,7 +64,7 @@ export class AuthService {
             );
           }
 
-          // Obtener rol por defecto
+          // Obtener rol por defecto usando funcionalidad del repository
           const defaultRole = await this.roleRepository.getDefaultRole();
           if (!defaultRole) {
             throw new AuthError(
@@ -66,7 +74,7 @@ export class AuthService {
             );
           }
 
-          // Preparar datos del usuario
+          // Preparar datos completos del usuario (aprovechando schema completo)
           const userData = {
             email: email.toLowerCase(),
             profile: {
@@ -76,22 +84,63 @@ export class AuthService {
               dateOfBirth: profile.dateOfBirth || null,
               phone: profile.phone || null,
               bio: profile.bio || null,
+              website: profile.website || null,
+              isActive: true,
             },
             roles: [defaultRole._id],
+
+            // Preferencias empresariales completas
             preferences: {
               language: preferences.language || "es",
               timezone: preferences.timezone || "America/Lima",
-              ...preferences,
+              notifications: {
+                email: preferences.notifications?.email !== false,
+                push: preferences.notifications?.push !== false,
+                sms: preferences.notifications?.sms || false,
+                marketing: preferences.notifications?.marketing || false,
+              },
+              privacy: {
+                profileVisible: preferences.privacy?.profileVisible !== false,
+                allowDataCollection:
+                  preferences.privacy?.allowDataCollection !== false,
+                allowLocationTracking:
+                  preferences.privacy?.allowLocationTracking || false,
+                showInSearch: preferences.privacy?.showInSearch !== false,
+                allowBusinessContact:
+                  preferences.privacy?.allowBusinessContact !== false,
+                shareAnalytics: preferences.privacy?.shareAnalytics !== false,
+                allowPersonalization:
+                  preferences.privacy?.allowPersonalization !== false,
+                shareWithPartners:
+                  preferences.privacy?.shareWithPartners || false,
+                allowCookies: preferences.privacy?.allowCookies !== false,
+                dataRetentionPeriod:
+                  preferences.privacy?.dataRetentionPeriod || "2years",
+              },
             },
-            registrationSource,
-            isEmailVerified: oauthProvider ? true : false, // OAuth emails son pre-verificados
+            registrationSource: registrationSource || "web",
+            isEmailVerified: oauthProvider ? true : false,
+
+            // Metadata empresarial completo (usando funcionalidad del schema)
+            metadata: {
+              registrationDetails: {
+                ipAddress: ipAddress || "unknown",
+                userAgent: userAgent || "unknown",
+                referrer: registrationData.referrer || null,
+                utmSource: registrationData.utmSource || null,
+                utmMedium: registrationData.utmMedium || null,
+                utmCampaign: registrationData.utmCampaign || null,
+                companyContext: companyContext || null,
+              },
+            },
           };
 
-          // Crear usuario
+          // Crear usuario usando funcionalidad completa del repository
           const sessionData = {
-            userId: null, // Se establece después de crear el usuario
+            userId: null,
             ip: ipAddress,
             userAgent,
+            action: "user_registration",
           };
 
           const newUser = await this.userRepository.createUser(
@@ -100,7 +149,7 @@ export class AuthService {
             { session }
           );
 
-          // Conectar OAuth si aplica
+          // Conectar OAuth si aplica (usando método del repository)
           if (oauthProvider && oauthData) {
             await this.userRepository.connectOAuthProvider(
               newUser._id,
@@ -110,7 +159,7 @@ export class AuthService {
             );
           }
 
-          // Generar token de verificación de email si no es OAuth
+          // Generar token de verificación usando funcionalidad del repository
           let verificationToken = null;
           if (!oauthProvider) {
             verificationToken =
@@ -120,15 +169,20 @@ export class AuthService {
               );
           }
 
-          console.log(`✅ Usuario registrado: ${email} (ID: ${newUser._id})`);
+          console.log(
+            `✅ Usuario registrado con funcionalidades empresariales: ${email} (ID: ${newUser._id})`
+          );
 
           return {
-            user: this.sanitizeUser(newUser),
+            user: this.sanitizeUserEnhanced(newUser),
             verificationToken,
             requiresEmailVerification: !oauthProvider,
+            profileCompleteness:
+              this.userRepository.calculateProfileCompleteness(userData),
+            recommendedActions: this.getRecommendedActionsForNewUser(newUser),
           };
         } catch (error) {
-          console.error("Error en registro:", error);
+          console.error("Error en registro empresarial:", error);
           if (error instanceof AuthError) {
             throw error;
           }
@@ -143,16 +197,24 @@ export class AuthService {
   }
 
   /**
-   * Iniciar sesión con email y contraseña
+   * Login con análisis de seguridad avanzado
    * @param {Object} loginData - Datos de login
    * @param {Object} requestInfo - Información del request
    */
   async login(loginData, requestInfo) {
     try {
-      const { email, password, rememberMe = false } = loginData;
+      const {
+        email,
+        password,
+        rememberMe = false,
+        twoFactorCode = null,
+        companyId = null,
+        businessContext = {},
+      } = loginData;
+
       const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
 
-      // Validar credenciales
+      // Validar credenciales usando funcionalidad completa del repository
       const user = await this.userRepository.validateCredentials(
         email,
         password
@@ -165,13 +227,35 @@ export class AuthService {
         );
       }
 
-      // Verificar estado de la cuenta
-      this.validateUserStatus(user);
+      // Verificar estado completo del usuario
+      await this.validateUserStatusEnhanced(user);
 
-      // Generar tokens
-      const tokens = this.generateTokens(user._id);
+      // Verificar 2FA si está habilitado
+      if (user.twoFactorEnabled && !twoFactorCode) {
+        return {
+          requiresTwoFactor: true,
+          message: "Código de autenticación de dos factores requerido",
+        };
+      }
 
-      // Crear sesión
+      if (user.twoFactorEnabled && twoFactorCode) {
+        const isValidCode = this.userRepository.verifyTwoFactorCode(
+          user.twoFactorSecret,
+          twoFactorCode
+        );
+        if (!isValidCode) {
+          throw new AuthError(
+            "Código de autenticación inválido",
+            AuthErrorCodes.INVALID_2FA_CODE,
+            401
+          );
+        }
+      }
+
+      // Generar tokens seguros
+      const tokens = this.generateSecureTokens();
+
+      // Crear sesión usando funcionalidad empresarial completa
       const sessionData = {
         userId: user._id,
         accessToken: tokens.accessToken,
@@ -180,37 +264,55 @@ export class AuthService {
         ipAddress,
         userAgent,
         rememberMe,
+        companyId,
+        businessContext,
+
+        // Datos adicionales para analytics empresariales
+        dataProcessingConsent: loginData.dataProcessingConsent || false,
+        cookiesAccepted: loginData.cookiesAccepted || false,
+        marketingConsent: loginData.marketingConsent || false,
+        analyticsConsent: loginData.analyticsConsent || false,
       };
 
       const userDataForAudit = {
         userId: user._id,
         ip: ipAddress,
         userAgent,
+        action: "user_login",
       };
 
+      // Crear sesión con funcionalidades empresariales
       const session = await this.sessionRepository.createSession(
         sessionData,
         userDataForAudit
       );
 
-      // Actualizar estadísticas de login
-      await this.userRepository.resetLoginAttempts(user._id);
+      // Actualizar estadísticas usando funcionalidad del repository
+      await this.userRepository.updateLoginAttempts(user._id, true);
+
+      // Obtener permisos del usuario usando funcionalidad del role repository
+      const userPermissions = await this.roleRepository.getUserPermissions(
+        user._id
+      );
 
       console.log(
-        `✅ Usuario autenticado: ${email} (Sesión: ${session.sessionId})`
+        `✅ Login empresarial exitoso: ${email} (Sesión: ${session._id})`
       );
 
       return {
-        user: this.sanitizeUser(user),
+        user: this.sanitizeUserEnhanced(user),
         session: {
           sessionToken: session.sessionToken,
           expiresAt: session.expiresAt,
           rememberMe: session.rememberMe,
+          sessionId: session._id,
         },
-        // Los access/refresh tokens NO se devuelven al cliente
+        permissions: userPermissions,
+        businessContext: companyId ? { companyId, ...businessContext } : null,
+        // Los tokens NO se devuelven al cliente por seguridad
       };
     } catch (error) {
-      console.error("Error en login:", error);
+      console.error("Error en login empresarial:", error);
       if (error instanceof AuthError) {
         throw error;
       }
@@ -223,7 +325,99 @@ export class AuthService {
   }
 
   /**
-   * Autenticación OAuth
+   * Validación de sesión con políticas empresariales
+   * @param {string} sessionToken - Token de sesión
+   * @param {Object} requestInfo - Información del request
+   */
+  async validateSession(sessionToken, requestInfo) {
+    try {
+      const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
+
+      // Usar validación avanzada del repository
+      const validationResult =
+        await this.sessionRepository.validateSessionWithPolicy(sessionToken, {
+          deviceFingerprint,
+          ipAddress,
+          userAgent,
+          location: requestInfo.location,
+        });
+
+      if (!validationResult.valid) {
+        return {
+          isValid: false,
+          reason: validationResult.reason,
+          code: this.mapValidationReasonToErrorCode(validationResult.reason),
+        };
+      }
+
+      const { session, userId, businessMetrics } = validationResult;
+
+      // Obtener datos completos del usuario
+      const user = await this.userRepository.findById(userId, {
+        includeRoles: true,
+      });
+
+      if (!user) {
+        await this.sessionRepository.invalidateSession(
+          session.sessionId,
+          "user_not_found"
+        );
+        return {
+          isValid: false,
+          reason: "Usuario no encontrado",
+          code: AuthErrorCodes.SESSION_INVALID,
+        };
+      }
+
+      // Validar estado empresarial del usuario
+      await this.validateUserStatusEnhanced(user);
+
+      // Actualizar métricas empresariales si hay actividad
+      if (requestInfo.activityData) {
+        await this.sessionRepository.updateBusinessMetrics(
+          session.sessionId,
+          requestInfo.activityData,
+          { userId }
+        );
+      }
+
+      return {
+        isValid: true,
+        user: {
+          id: user._id,
+          email: user.email,
+          profile: user.profile,
+          roles: user.roles,
+          preferences: user.preferences,
+          isEmailVerified: user.isEmailVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+          profileCompleteness:
+            user.metadata?.activityTracking?.profileCompleteness || 0,
+          verificationLevel:
+            user.metadata?.activityTracking?.accountVerificationLevel || 0,
+        },
+        session: {
+          id: session.sessionId,
+          expiresAt: session.expiresAt,
+          lastAccessedAt: new Date(),
+          rememberMe: session.rememberMe,
+          businessMetrics,
+        },
+        permissions: await this.roleRepository.getUserPermissions(user._id),
+        requiresTwoFactor: validationResult.requiresTwoFactor,
+      };
+    } catch (error) {
+      console.error("Error validando sesión empresarial:", error);
+      return {
+        isValid: false,
+        reason: "Error interno validando sesión",
+        code: AuthErrorCodes.SESSION_INVALID,
+      };
+    }
+  }
+
+  /**
+   * OAuth con funcionalidades empresariales completas
    * @param {Object} oauthData - Datos de OAuth
    * @param {Object} requestInfo - Información del request
    */
@@ -239,15 +433,16 @@ export class AuthService {
             accessToken,
             refreshToken,
             expiresIn,
+            scope = [],
           } = oauthData;
 
           const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
 
-          // Buscar usuario existente por email
+          // Buscar usuario existente usando funcionalidad del repository
           let user = await this.userRepository.findByEmail(email);
 
           if (user) {
-            // Usuario existe - conectar OAuth si no está conectado
+            // Usuario existe - conectar OAuth usando método del repository
             if (!user.oauthProviders?.[provider]?.providerId) {
               await this.userRepository.connectOAuthProvider(
                 user._id,
@@ -261,24 +456,33 @@ export class AuthService {
                   userId: user._id,
                   ip: ipAddress,
                   userAgent,
+                  action: "oauth_connect",
                 }
               );
             }
 
-            // Marcar email como verificado si viene de OAuth
+            // Marcar email como verificado
             if (!user.isEmailVerified) {
               await this.userRepository.update(
                 user._id,
-                { isEmailVerified: true },
+                {
+                  isEmailVerified: true,
+                  "metadata.activityTracking.accountVerificationLevel":
+                    this.userRepository.calculateVerificationLevel({
+                      ...user,
+                      isEmailVerified: true,
+                    }),
+                },
                 {
                   userId: user._id,
                   ip: ipAddress,
                   userAgent,
+                  action: "email_verification_oauth",
                 }
               );
             }
           } else {
-            // Usuario nuevo - registrar automáticamente
+            // Usuario nuevo - usar registro empresarial completo
             const registrationData = {
               email,
               profile: {
@@ -303,16 +507,18 @@ export class AuthService {
               registrationData,
               requestInfo
             );
-            user = registrationResult.user;
+            user = await this.userRepository.findById(
+              registrationResult.user.id
+            );
           }
 
-          // Verificar estado de la cuenta
-          this.validateUserStatus(user);
+          // Validar estado empresarial
+          await this.validateUserStatusEnhanced(user);
 
-          // Generar tokens JWT
-          const tokens = this.generateTokens(user._id);
+          // Generar tokens seguros
+          const tokens = this.generateSecureTokens();
 
-          // Crear sesión con datos OAuth
+          // Crear sesión OAuth empresarial
           const sessionData = {
             userId: user._id,
             accessToken: tokens.accessToken,
@@ -320,13 +526,13 @@ export class AuthService {
             deviceFingerprint,
             ipAddress,
             userAgent,
-            rememberMe: true, // OAuth sessions son persistentes por defecto
+            rememberMe: true,
             oauthProvider: provider,
             oauthSessionData: {
               accessToken,
               refreshToken,
-              expiresAt: new Date(Date.now() + expiresIn * 1000),
-              scope: [], // Agregar scopes si es necesario
+              expiresAt: new Date(Date.now() + (expiresIn || 3600) * 1000),
+              scope,
             },
           };
 
@@ -336,24 +542,30 @@ export class AuthService {
               userId: user._id,
               ip: ipAddress,
               userAgent,
+              action: "oauth_login",
             }
           );
 
-          console.log(`✅ OAuth login exitoso: ${email} via ${provider}`);
+          console.log(`✅ OAuth empresarial exitoso: ${email} via ${provider}`);
 
           return {
-            user: this.sanitizeUser(user),
+            user: this.sanitizeUserEnhanced(user),
             session: {
               sessionToken: userSession.sessionToken,
               expiresAt: userSession.expiresAt,
               rememberMe: userSession.rememberMe,
+              sessionId: userSession._id,
             },
-            isNewUser:
-              !user.createdAt ||
-              Date.now() - new Date(user.createdAt).getTime() < 60000, // Nuevo si se creó hace menos de 1 minuto
+            permissions: await this.roleRepository.getUserPermissions(user._id),
+            oauth: {
+              provider,
+              connected: true,
+              scope,
+            },
+            isNewUser: !user.metadata?.activityTracking?.firstLogin,
           };
         } catch (error) {
-          console.error("Error en OAuth login:", error);
+          console.error("Error en OAuth empresarial:", error);
           if (error instanceof AuthError) {
             throw error;
           }
@@ -367,616 +579,122 @@ export class AuthService {
     );
   }
 
+  // =============================================================================
+  // NUEVOS MÉTODOS EMPRESARIALES
+  // =============================================================================
+
   /**
-   * Validar sesión activa
-   * @param {string} sessionToken - Token de sesión
+   * Habilitar 2FA usando funcionalidad del repository
+   * @param {string} userId - ID del usuario
    * @param {Object} requestInfo - Información del request
    */
-  async validateSession(sessionToken, requestInfo) {
-    try {
-      const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
-
-      // Buscar sesión activa
-      const session =
-        await this.sessionRepository.findBySessionToken(sessionToken);
-
-      if (!session) {
-        return {
-          isValid: false,
-          reason: "Sesión no encontrada",
-          code: AuthErrorCodes.SESSION_INVALID,
-        };
-      }
-
-      // Verificar si la sesión ha expirado
-      if (session.expiresAt < new Date()) {
-        await this.sessionRepository.invalidateSession(session._id, "expired");
-        return {
-          isValid: false,
-          reason: "Sesión expirada",
-          code: AuthErrorCodes.SESSION_EXPIRED,
-        };
-      }
-
-      // Verificar si la sesión está activa
-      if (!session.isActive) {
-        return {
-          isValid: false,
-          reason: "Sesión inactiva",
-          code: AuthErrorCodes.SESSION_INVALID,
-        };
-      }
-
-      // Verificar device fingerprint si está disponible
-      if (
-        deviceFingerprint &&
-        session.deviceFingerprint !== deviceFingerprint
-      ) {
-        // Analizar cambio de fingerprint
-        const fingerprintAnalysis = await this.analyzeDeviceFingerprintChange(
-          session,
-          deviceFingerprint
-        );
-
-        if (fingerprintAnalysis.isSuspicious) {
-          await this.sessionRepository.flagSuspiciousActivity(
-            session._id,
-            "device_change",
-            fingerprintAnalysis
-          );
-
-          return {
-            isValid: false,
-            reason: "Dispositivo no reconocido",
-            code: AuthErrorCodes.DEVICE_NOT_RECOGNIZED,
-          };
-        }
-      }
-
-      // Obtener datos del usuario
-      const user = await this.userRepository.findById(session.userId);
-      if (!user) {
-        await this.sessionRepository.invalidateSession(
-          session._id,
-          "user_not_found"
-        );
-        return {
-          isValid: false,
-          reason: "Usuario no encontrado",
-          code: AuthErrorCodes.SESSION_INVALID,
-        };
-      }
-
-      // Validar estado del usuario
-      this.validateUserStatus(user);
-
-      // Actualizar última actividad de la sesión
-      await this.sessionRepository.updateLastActivity(session._id, {
-        ipAddress,
-        userAgent,
-      });
-
-      return {
-        isValid: true,
-        user: {
-          id: user._id,
-          email: user.email,
-          profile: user.profile,
-          roles: user.roles,
-          preferences: user.preferences,
-          isEmailVerified: user.isEmailVerified,
-        },
-        session: {
-          id: session._id,
-          expiresAt: session.expiresAt,
-          lastAccessedAt: new Date(),
-          rememberMe: session.rememberMe,
-        },
-      };
-    } catch (error) {
-      console.error("Error validando sesión:", error);
-      return {
-        isValid: false,
-        reason: "Error interno validando sesión",
-        code: AuthErrorCodes.SESSION_INVALID,
-      };
-    }
-  }
-
-  /**
-   * Analizar cambio de device fingerprint
-   * @param {Object} session - Sesión actual
-   * @param {string} newFingerprint - Nuevo fingerprint
-   */
-  async analyzeDeviceFingerprintChange(session, newFingerprint) {
-    try {
-      const {
-        deviceFingerprint: originalFingerprint,
-        fingerprintChanges = [],
-      } = session;
-
-      // Calcular similaridad básica (implementación simple)
-      const similarity = this.calculateFingerprintSimilarity(
-        originalFingerprint,
-        newFingerprint
-      );
-
-      // Analizar patrones sospechosos
-      const recentChanges = fingerprintChanges.filter(
-        (change) =>
-          change.changedAt > new Date(Date.now() - 24 * 60 * 60 * 1000) // últimas 24h
-      );
-
-      const isSuspicious =
-        similarity < 0.7 || // Muy diferente
-        recentChanges.length >=
-          AuthConstants.SECURITY_LIMITS.MAX_FINGERPRINT_CHANGES;
-
-      return {
-        similarity,
-        isSuspicious,
-        recentChanges: recentChanges.length,
-        recommendation: isSuspicious ? "block" : "allow",
-        analysis: {
-          similarityScore: similarity,
-          changeFrequency: recentChanges.length,
-          riskLevel: isSuspicious ? "high" : "low",
-        },
-      };
-    } catch (error) {
-      console.error("Error analizando cambio de fingerprint:", error);
-      return {
-        similarity: 0,
-        isSuspicious: true,
-        recommendation: "block",
-        analysis: { riskLevel: "high", error: error.message },
-      };
-    }
-  }
-
-  /**
-   * Calcular similaridad entre fingerprints
-   * @param {string} fp1 - Fingerprint 1
-   * @param {string} fp2 - Fingerprint 2
-   */
-  calculateFingerprintSimilarity(fp1, fp2) {
-    if (!fp1 || !fp2) return 0;
-    if (fp1 === fp2) return 1;
-
-    // Implementación básica usando distancia de Hamming normalizada
-    const maxLength = Math.max(fp1.length, fp2.length);
-    let differences = Math.abs(fp1.length - fp2.length);
-
-    const minLength = Math.min(fp1.length, fp2.length);
-    for (let i = 0; i < minLength; i++) {
-      if (fp1[i] !== fp2[i]) {
-        differences++;
-      }
-    }
-
-    return Math.max(0, 1 - differences / maxLength);
-  }
-
-  /**
-   * Cerrar sesión
-   * @param {string} sessionToken - Token de sesión
-   * @param {Object} requestInfo - Información del request
-   */
-  async logout(sessionToken, requestInfo) {
+  async enableTwoFactor(userId, requestInfo) {
     try {
       const { ipAddress, userAgent } = requestInfo;
 
-      // Buscar sesión por token
-      const session = await this.sessionRepository.model.findOne({
-        sessionToken,
-        isActive: true,
-      });
-
-      if (session) {
-        await this.sessionRepository.invalidateSession(
-          session._id,
-          "manual_logout"
-        );
-
-        console.log(
-          `✅ Logout exitoso: Usuario ${session.userId} desde ${ipAddress}`
-        );
-        return { success: true };
-      }
-
-      return { success: false, message: "Sesión no encontrada" };
-    } catch (error) {
-      console.error("Error en logout:", error);
-      throw new AuthError(
-        "Error interno durante logout",
-        AuthErrorCodes.LOGOUT_FAILED,
-        500
-      );
-    }
-  }
-
-  /**
-   * Cerrar todas las sesiones de un usuario
-   * @param {string} userId - ID del usuario
-   * @param {string} exceptSessionId - ID de sesión a conservar (opcional)
-   * @param {Object} requestInfo - Información del request
-   */
-  async logoutAllDevices(userId, exceptSessionId = null, requestInfo) {
-    try {
-      const { ipAddress } = requestInfo;
-
-      const invalidatedCount =
-        await this.sessionRepository.invalidateUserSessions(userId, {
-          exceptSessionId,
-          reason: "logout_all_devices",
-        });
-
-      console.log(
-        `✅ Logout masivo: ${invalidatedCount} sesiones cerradas para usuario ${userId}`
-      );
-
-      return {
-        success: true,
-        invalidatedSessions: invalidatedCount,
-      };
-    } catch (error) {
-      console.error("Error en logout masivo:", error);
-      throw new AuthError(
-        "Error cerrando todas las sesiones",
-        AuthErrorCodes.LOGOUT_FAILED,
-        500
-      );
-    }
-  }
-
-  /**
-   * Refrescar tokens de acceso
-   * @param {string} sessionToken - Token de sesión
-   * @param {Object} requestInfo - Información del request
-   */
-  async refreshTokens(sessionToken, requestInfo) {
-    try {
-      const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
-
-      // Validar sesión actual
-      const session = await this.sessionRepository.validateSession(
-        sessionToken,
-        deviceFingerprint,
-        ipAddress
-      );
-
-      if (!session) {
-        throw new AuthError(
-          "Sesión inválida para renovación",
-          AuthErrorCodes.SESSION_INVALID,
-          401
-        );
-      }
-
-      // Generar nuevos tokens
-      const newTokens = this.generateTokens(session.userId);
-
-      // Actualizar sesión con nuevos tokens
-      await this.sessionRepository.rotateTokens(
-        session.sessionId,
-        newTokens.accessToken,
-        newTokens.refreshToken,
-        {
-          userId: session.userId,
-          ip: ipAddress,
-          userAgent,
-        }
-      );
-
-      console.log(`🔄 Tokens renovados para sesión: ${session.sessionId}`);
-
-      return {
-        success: true,
-        expiresAt: session.expiresAt,
-      };
-    } catch (error) {
-      console.error("Error renovando tokens:", error);
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      throw new AuthError(
-        "Error renovando tokens",
-        AuthErrorCodes.TOKEN_REFRESH_FAILED,
-        500
-      );
-    }
-  }
-
-  /**
-   * Verificar email con token
-   * @param {string} token - Token de verificación
-   */
-  async verifyEmail(token) {
-    return await TransactionHelper.executeWithOptionalTransaction(
-      async (session) => {
-        try {
-          if (!token) {
-            throw new AuthError(
-              "Token de verificación requerido",
-              AuthErrorCodes.VERIFICATION_TOKEN_INVALID,
-              400
-            );
-          }
-
-          // Buscar usuario por token de verificación
-          const user = await this.userRepository.model
-            .findOne({
-              emailVerificationToken: token,
-              emailVerificationExpires: { $gt: new Date() },
-            })
-            .session(session);
-
-          if (!user) {
-            throw new AuthError(
-              "Token de verificación inválido o expirado",
-              AuthErrorCodes.VERIFICATION_TOKEN_INVALID,
-              400
-            );
-          }
-
-          // Actualizar usuario como verificado
-          const updatedUser = await this.userRepository.model.findByIdAndUpdate(
-            user._id,
-            {
-              $set: {
-                isEmailVerified: true,
-                updatedAt: new Date(),
-              },
-              $unset: {
-                emailVerificationToken: 1,
-                emailVerificationExpires: 1,
-              },
-            },
-            { new: true, session }
-          );
-
-          console.log(`✅ Email verificado para usuario: ${user.email}`);
-
-          return {
-            user: {
-              id: updatedUser._id,
-              email: updatedUser.email,
-              isEmailVerified: updatedUser.isEmailVerified,
-            },
-          };
-        } catch (error) {
-          console.error("Error verificando email:", error);
-          throw error;
-        }
-      }
-    );
-  }
-
-  /**
-   * Solicitar reset de contraseña
-   * @param {string} email - Email del usuario
-   * @param {Object} requestInfo - Información del request
-   */
-  async requestPasswordReset(email, requestInfo) {
-    return await TransactionHelper.executeWithOptionalTransaction(
-      async (session) => {
-        try {
-          const { ipAddress, userAgent } = requestInfo;
-
-          // Buscar usuario por email (sin mostrar si existe o no)
-          const user = await this.userRepository.findByEmail(email);
-
-          if (!user) {
-            // Por seguridad, no revelar si el email existe
-            console.log(`⚠️ Intento de reset para email inexistente: ${email}`);
-            return { success: true }; // Respuesta genérica
-          }
-
-          // Validar estado del usuario
-          this.validateUserStatus(user);
-
-          // Generar token de reset
-          const resetToken = crypto.randomBytes(32).toString("hex");
-          const resetExpires = new Date(
-            Date.now() + AuthConstants.TOKEN_CONFIG.PASSWORD_RESET_TTL * 1000
-          );
-
-          // Actualizar usuario con token de reset
-          await this.userRepository.model.findByIdAndUpdate(
-            user._id,
-            {
-              $set: {
-                passwordResetToken: resetToken,
-                passwordResetExpires: resetExpires,
-                updatedAt: new Date(),
-              },
-            },
-            { session }
-          );
-
-          // TODO: Enviar email con el token de reset
-          // await emailService.sendPasswordResetEmail(user.email, resetToken);
-
-          console.log(`📧 Token de reset generado para: ${user.email}`);
-          console.log(`🔐 Token (desarrollo): ${resetToken}`); // Solo en desarrollo
-
-          return { success: true };
-        } catch (error) {
-          console.error("Error solicitando reset de contraseña:", error);
-          throw error;
-        }
-      }
-    );
-  }
-
-  /**
-   * Resetear contraseña con token
-   * @param {string} token - Token de reset
-   * @param {string} newPassword - Nueva contraseña
-   * @param {Object} requestInfo - Información del request
-   */
-  async resetPassword(token, newPassword, requestInfo) {
-    return await TransactionHelper.executeWithOptionalTransaction(
-      async (session) => {
-        try {
-          // Validar nueva contraseña
-          const passwordValidation = this.validatePasswordStrength(newPassword);
-          if (!passwordValidation.isValid) {
-            throw new AuthError(
-              `Contraseña débil: ${passwordValidation.errors.join(", ")}`,
-              AuthErrorCodes.WEAK_PASSWORD,
-              400
-            );
-          }
-
-          // Buscar usuario por token de reset
-          const user = await this.userRepository.model
-            .findOne({
-              passwordResetToken: token,
-              passwordResetExpires: { $gt: new Date() },
-            })
-            .session(session);
-
-          if (!user) {
-            throw new AuthError(
-              "Token de reset inválido o expirado",
-              AuthErrorCodes.PASSWORD_RESET_TOKEN_INVALID,
-              400
-            );
-          }
-
-          // Validar estado del usuario
-          this.validateUserStatus(user);
-
-          // Hash de la nueva contraseña
-          const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-          // Actualizar contraseña y limpiar tokens
-          const updatedUser = await this.userRepository.model.findByIdAndUpdate(
-            user._id,
-            {
-              $set: {
-                passwordHash: hashedPassword,
-                updatedAt: new Date(),
-                // Resetear intentos de login
-                loginAttempts: 0,
-              },
-              $unset: {
-                passwordResetToken: 1,
-                passwordResetExpires: 1,
-                lockUntil: 1, // Desbloquear cuenta si estaba bloqueada
-              },
-            },
-            { new: true, session }
-          );
-
-          // Invalidar todas las sesiones existentes por seguridad
-          await this.sessionRepository.invalidateUserSessions(
-            user._id,
-            "password_reset",
-            { session }
-          );
-
-          console.log(`🔐 Contraseña reseteada para usuario: ${user.email}`);
-
-          return {
-            user: {
-              id: updatedUser._id,
-              email: updatedUser.email,
-            },
-          };
-        } catch (error) {
-          console.error("Error reseteando contraseña:", error);
-          throw error;
-        }
-      }
-    );
-  }
-
-  /**
-   * Cambiar contraseña (usuario autenticado)
-   * @param {string} userId - ID del usuario
-   * @param {string} currentPassword - Contraseña actual
-   * @param {string} newPassword - Nueva contraseña
-   * @param {Object} requestInfo - Información del request
-   */
-  async changePassword(userId, currentPassword, newPassword, requestInfo) {
-    try {
-      const { ipAddress, userAgent } = requestInfo;
-
-      // Obtener usuario con contraseña
-      const user = await this.userRepository.model
-        .findById(userId)
-        .select("+passwordHash");
-      if (!user) {
-        throw new AuthError(
-          "Usuario no encontrado",
-          AuthErrorCodes.USER_NOT_FOUND,
-          404
-        );
-      }
-
-      // Validar contraseña actual
-      const bcrypt = require("bcrypt");
-      const isCurrentValid = await bcrypt.compare(
-        currentPassword,
-        user.passwordHash
-      );
-      if (!isCurrentValid) {
-        throw new AuthError(
-          "Contraseña actual incorrecta",
-          AuthErrorCodes.INVALID_CREDENTIALS,
-          401
-        );
-      }
-
-      // Validar nueva contraseña
-      const passwordValidation = this.validatePasswordStrength(newPassword);
-      if (!passwordValidation.isValid) {
-        throw new AuthError(
-          `Contraseña débil: ${passwordValidation.errors.join(", ")}`,
-          AuthErrorCodes.WEAK_PASSWORD,
-          400
-        );
-      }
-
-      // Cambiar contraseña
-      await this.userRepository.setPassword(userId, newPassword, {
+      const userData = {
         userId,
         ip: ipAddress,
         userAgent,
-      });
+        action: "enable_2fa",
+      };
 
-      console.log(`✅ Contraseña cambiada: Usuario ${userId}`);
+      const result = await this.userRepository.enableTwoFactor(
+        userId,
+        userData
+      );
 
       return {
         success: true,
-        message: "Contraseña actualizada exitosamente",
+        backupCodes: result.backupCodes,
+        qrCodeUrl: result.qrCodeUrl,
+        secretKey: result.secretKey, // Solo se muestra una vez
+        message: "Autenticación de dos factores habilitada exitosamente",
       };
     } catch (error) {
-      console.error("Error cambiando contraseña:", error);
-      if (error instanceof AuthError) {
-        throw error;
-      }
+      console.error("Error habilitando 2FA:", error);
       throw new AuthError(
-        "Error interno cambiando contraseña",
-        AuthErrorCodes.PASSWORD_CHANGE_FAILED,
+        "Error habilitando autenticación de dos factores",
+        AuthErrorCodes.TWO_FACTOR_SETUP_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Actualizar preferencias empresariales
+   * @param {string} userId - ID del usuario
+   * @param {Object} preferences - Nuevas preferencias
+   * @param {Object} requestInfo - Información del request
+   */
+  async updateBusinessPreferences(userId, preferences, requestInfo) {
+    try {
+      const { ipAddress, userAgent } = requestInfo;
+
+      const userData = {
+        userId,
+        ip: ipAddress,
+        userAgent,
+        action: "update_business_preferences",
+      };
+
+      await this.userRepository.updateBusinessPreferences(
+        userId,
+        preferences,
+        userData
+      );
+
+      return {
+        success: true,
+        message: "Preferencias empresariales actualizadas exitosamente",
+      };
+    } catch (error) {
+      console.error("Error actualizando preferencias empresariales:", error);
+      throw new AuthError(
+        "Error actualizando preferencias",
+        AuthErrorCodes.PREFERENCES_UPDATE_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Obtener análisis de actividad del usuario
+   * @param {string} userId - ID del usuario
+   * @param {Object} options - Opciones de análisis
+   */
+  async getUserActivityAnalysis(userId, options = {}) {
+    try {
+      const analysis = await this.userRepository.getUserActivityAnalysis(
+        userId,
+        options
+      );
+      return {
+        success: true,
+        data: analysis,
+      };
+    } catch (error) {
+      console.error("Error obteniendo análisis de actividad:", error);
+      throw new AuthError(
+        "Error obteniendo análisis de usuario",
+        AuthErrorCodes.ANALYSIS_FAILED,
         500
       );
     }
   }
 
   // =============================================================================
-  // MÉTODOS AUXILIARES
+  // MÉTODOS AUXILIARES MEJORADOS
   // =============================================================================
 
   /**
-   * Validar datos de registro
+   * Validación de datos de registro mejorada
    * @param {Object} data - Datos de registro
    */
-  validateRegistrationData(data) {
-    const { email, password, profile } = data;
+  async validateRegistrationDataEnhanced(data) {
+    const { email, password, profile, businessPreferences } = data;
 
+    // Validaciones básicas
     if (!email || !this.isValidEmail(email)) {
       throw new AuthError("Email inválido", AuthErrorCodes.INVALID_EMAIL, 400);
     }
@@ -989,6 +707,7 @@ export class AuthService {
       );
     }
 
+    // Validación de contraseña si se proporciona
     if (password) {
       const passwordValidation = this.validatePasswordStrength(password);
       if (!passwordValidation.isValid) {
@@ -999,14 +718,43 @@ export class AuthService {
         );
       }
     }
+
+    // Validaciones empresariales adicionales
+    if (
+      businessPreferences?.searchRadius &&
+      (businessPreferences.searchRadius < 1 ||
+        businessPreferences.searchRadius > 100)
+    ) {
+      throw new AuthError(
+        "Radio de búsqueda debe estar entre 1 y 100 km",
+        AuthErrorCodes.INVALID_BUSINESS_PREFERENCES,
+        400
+      );
+    }
+
+    if (profile.phone && !this.isValidPhone(profile.phone)) {
+      throw new AuthError(
+        "Formato de teléfono inválido",
+        AuthErrorCodes.INVALID_PHONE,
+        400
+      );
+    }
+
+    if (profile.website && !this.isValidUrl(profile.website)) {
+      throw new AuthError(
+        "URL de sitio web inválida",
+        AuthErrorCodes.INVALID_URL,
+        400
+      );
+    }
   }
 
   /**
-   * Validar estado del usuario
+   * Validación de estado de usuario mejorada
    * @param {Object} user - Usuario
    */
-  validateUserStatus(user) {
-    if (!user.isActive) {
+  async validateUserStatusEnhanced(user) {
+    if (!user.isActive || !user.profile?.isActive) {
       throw new AuthError(
         "Cuenta desactivada",
         AuthErrorCodes.ACCOUNT_DISABLED,
@@ -1022,37 +770,141 @@ export class AuthService {
       );
     }
 
-    // Opcional: requerir verificación de email
-    // if (!user.isEmailVerified) {
-    //   throw new AuthError(
-    //     "Email no verificado",
-    //     AuthErrorCodes.EMAIL_NOT_VERIFIED,
-    //     403
-    //   );
-    // }
+    // Verificar si el usuario ha sido marcado para eliminación por GDPR
+    if (user.metadata?.privacyFlags?.requiresDataDeletion) {
+      throw new AuthError(
+        "Cuenta programada para eliminación",
+        AuthErrorCodes.ACCOUNT_SCHEDULED_DELETION,
+        403
+      );
+    }
+
+    // Opcional: requerir verificación de email para ciertas acciones
+    if (user.metadata?.activityTracking?.accountVerificationLevel < 0.3) {
+      console.log(`⚠️ Usuario con verificación baja: ${user.email}`);
+    }
   }
 
   /**
-   * Generar tokens JWT
-   * @param {string} userId - ID del usuario
+   * Generar tokens seguros usando crypto en lugar de JWT para sesiones
    */
-  generateTokens(userId) {
-    const { TOKEN_CONFIG } = AuthConstants;
-
-    const accessToken = jwt.sign({ userId, type: "access" }, this.jwtSecret, {
-      expiresIn: TOKEN_CONFIG.ACCESS_TOKEN_TTL,
-    });
-
-    const refreshToken = jwt.sign({ userId, type: "refresh" }, this.jwtSecret, {
-      expiresIn: TOKEN_CONFIG.REFRESH_TOKEN_TTL,
-    });
-
-    return { accessToken, refreshToken };
+  generateSecureTokens() {
+    return {
+      accessToken: crypto.randomBytes(32).toString("hex"),
+      refreshToken: crypto.randomBytes(32).toString("hex"),
+    };
   }
 
   /**
-   * Validar formato de email
-   * @param {string} email - Email
+   * Sanitización de usuario mejorada
+   * @param {Object} user - Usuario
+   */
+  sanitizeUserEnhanced(user) {
+    const sanitized = { ...user };
+
+    // Remover campos sensibles
+    delete sanitized.passwordHash;
+    delete sanitized.emailVerificationToken;
+    delete sanitized.passwordResetToken;
+    delete sanitized.twoFactorSecret;
+    delete sanitized.loginAttempts;
+    delete sanitized.lockUntil;
+
+    // Limpiar OAuth providers (mantener solo info no sensible)
+    if (sanitized.oauthProviders) {
+      Object.keys(sanitized.oauthProviders).forEach((provider) => {
+        if (sanitized.oauthProviders[provider]?.providerId) {
+          sanitized.oauthProviders[provider] = {
+            isConnected: true,
+            email: sanitized.oauthProviders[provider].email,
+            connectedAt: sanitized.oauthProviders[provider].connectedAt,
+            lastUsed: sanitized.oauthProviders[provider].lastUsed,
+          };
+        } else {
+          delete sanitized.oauthProviders[provider];
+        }
+      });
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * Mapear razones de validación a códigos de error
+   */
+  mapValidationReasonToErrorCode(reason) {
+    const mapping = {
+      session_not_found: AuthErrorCodes.SESSION_INVALID,
+      session_expired_inactivity: AuthErrorCodes.SESSION_EXPIRED,
+      user_inactive: AuthErrorCodes.ACCOUNT_DISABLED,
+      device_fingerprint_changed: AuthErrorCodes.DEVICE_NOT_RECOGNIZED,
+      location_change_not_allowed: AuthErrorCodes.LOCATION_RESTRICTED,
+      country_not_allowed: AuthErrorCodes.LOCATION_RESTRICTED,
+      device_type_not_allowed: AuthErrorCodes.DEVICE_NOT_RECOGNIZED,
+    };
+
+    return mapping[reason] || AuthErrorCodes.SESSION_INVALID;
+  }
+
+  /**
+   * Obtener acciones recomendadas para nuevo usuario
+   */
+  getRecommendedActionsForNewUser(user) {
+    const actions = [];
+
+    if (!user.isEmailVerified) {
+      actions.push({
+        type: "verify_email",
+        priority: "high",
+        message: "Verifica tu email para acceder a todas las funcionalidades",
+      });
+    }
+
+    if (!user.twoFactorEnabled) {
+      actions.push({
+        type: "enable_2fa",
+        priority: "medium",
+        message:
+          "Habilita la autenticación de dos factores para mayor seguridad",
+      });
+    }
+
+    const completeness = this.userRepository.calculateProfileCompleteness(user);
+    if (completeness < 0.8) {
+      actions.push({
+        type: "complete_profile",
+        priority: "medium",
+        message: "Completa tu perfil para una mejor experiencia",
+        completeness: Math.round(completeness * 100),
+      });
+    }
+
+    return actions;
+  }
+
+  // =============================================================================
+  // MÉTODOS DE VALIDACIÓN ADICIONALES
+  // =============================================================================
+
+  /**
+   * Validar formato de teléfono
+   */
+  isValidPhone(phone) {
+    const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+    const cleanPhone = phone.replace(/\s/g, "");
+    return phoneRegex.test(cleanPhone);
+  }
+
+  /**
+   * Validar URL
+   */
+  isValidUrl(url) {
+    const urlRegex = /^https?:\/\/.+/;
+    return urlRegex.test(url);
+  }
+
+  /**
+   * Validar formato de email (heredado)
    */
   isValidEmail(email) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1060,8 +912,7 @@ export class AuthService {
   }
 
   /**
-   * Validar fortaleza de contraseña
-   * @param {string} password - Contraseña
+   * Validar fortaleza de contraseña (heredado)
    */
   validatePasswordStrength(password) {
     const errors = [];
@@ -1092,20 +943,328 @@ export class AuthService {
     };
   }
 
+  // =============================================================================
+  // MÉTODOS HEREDADOS (MANTENER COMPATIBILIDAD)
+  // =============================================================================
+
   /**
-   * Sanitizar datos de usuario para respuesta
-   * @param {Object} user - Usuario
+   * Cerrar sesión (mejorado)
    */
-  sanitizeUser(user) {
-    const sanitized = { ...user };
+  async logout(sessionToken, requestInfo) {
+    try {
+      const { ipAddress, userAgent } = requestInfo;
 
-    // Remover campos sensibles
-    delete sanitized.passwordHash;
-    delete sanitized.emailVerificationToken;
-    delete sanitized.passwordResetToken;
-    delete sanitized.loginAttempts;
-    delete sanitized.lockUntil;
+      const result = await this.sessionRepository.invalidateSessionByToken(
+        sessionToken,
+        "user_logout"
+      );
 
-    return sanitized;
+      console.log(`✅ Logout empresarial exitoso desde ${ipAddress}`);
+      return result;
+    } catch (error) {
+      console.error("Error en logout empresarial:", error);
+      throw new AuthError(
+        "Error interno durante logout",
+        AuthErrorCodes.LOGOUT_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Cerrar todas las sesiones (usando funcionalidad del repository)
+   */
+  async logoutAllDevices(userId, exceptSessionId = null, requestInfo) {
+    try {
+      const { ipAddress } = requestInfo;
+
+      const result = await this.sessionRepository.invalidateUserSessions(
+        userId,
+        "logout_all_devices",
+        { excludeSessionId: exceptSessionId }
+      );
+
+      console.log(
+        `✅ Logout masivo empresarial: ${result.modifiedCount} sesiones cerradas`
+      );
+
+      return {
+        success: true,
+        invalidatedSessions: result.modifiedCount,
+      };
+    } catch (error) {
+      console.error("Error en logout masivo empresarial:", error);
+      throw new AuthError(
+        "Error cerrando todas las sesiones",
+        AuthErrorCodes.LOGOUT_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Verificar email con token (usando funcionalidad del repository)
+   */
+  async verifyEmail(token) {
+    try {
+      if (!token) {
+        throw new AuthError(
+          "Token de verificación requerido",
+          AuthErrorCodes.VERIFICATION_TOKEN_INVALID,
+          400
+        );
+      }
+
+      const userData = {
+        userId: null, // Se establece en el repository
+        ip: "unknown",
+        userAgent: "Email Verification",
+        action: "email_verification",
+      };
+
+      const result = await this.userRepository.verifyEmailWithToken(
+        token,
+        userData
+      );
+
+      console.log(`✅ Email verificado empresarialmente: ${result.email}`);
+
+      return {
+        user: result,
+        message: "Email verificado exitosamente",
+      };
+    } catch (error) {
+      console.error("Error verificando email empresarial:", error);
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError(
+        "Error verificando email",
+        AuthErrorCodes.VERIFICATION_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Solicitar reset de contraseña (usando funcionalidad del repository)
+   */
+  async requestPasswordReset(email, requestInfo) {
+    try {
+      const { ipAddress, userAgent } = requestInfo;
+
+      const result =
+        await this.userRepository.generatePasswordResetToken(email);
+
+      // TODO: Integrar con servicio de email
+      console.log(
+        `📧 Token de reset empresarial generado para: ${result.email}`
+      );
+      console.log(`🔐 Token (desarrollo): ${result.token}`);
+
+      return {
+        success: true,
+        message: "Si el email existe, recibirás un enlace de recuperación",
+      };
+    } catch (error) {
+      console.error("Error solicitando reset empresarial:", error);
+      // Por seguridad, siempre devolver éxito
+      return {
+        success: true,
+        message: "Si el email existe, recibirás un enlace de recuperación",
+      };
+    }
+  }
+
+  /**
+   * Resetear contraseña con token (usando funcionalidad del repository)
+   */
+  async resetPassword(token, newPassword, requestInfo) {
+    try {
+      const { ipAddress, userAgent } = requestInfo;
+
+      // Validar nueva contraseña
+      const passwordValidation = this.validatePasswordStrength(newPassword);
+      if (!passwordValidation.isValid) {
+        throw new AuthError(
+          `Contraseña débil: ${passwordValidation.errors.join(", ")}`,
+          AuthErrorCodes.WEAK_PASSWORD,
+          400
+        );
+      }
+
+      const sessionData = {
+        userId: null, // Se establece en el repository
+        ip: ipAddress,
+        userAgent,
+        action: "password_reset",
+      };
+
+      const result = await this.userRepository.resetPasswordWithToken(
+        token,
+        newPassword,
+        sessionData
+      );
+
+      // Invalidar todas las sesiones por seguridad
+      await this.sessionRepository.invalidateUserSessions(
+        result._id,
+        "password_reset"
+      );
+
+      console.log(`🔐 Contraseña reseteada empresarialmente: ${result.email}`);
+
+      return {
+        success: true,
+        message: "Contraseña reseteada exitosamente",
+        user: {
+          id: result._id,
+          email: result.email,
+        },
+      };
+    } catch (error) {
+      console.error("Error reseteando contraseña empresarial:", error);
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError(
+        "Error reseteando contraseña",
+        AuthErrorCodes.PASSWORD_RESET_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Cambiar contraseña (usando funcionalidad del repository)
+   */
+  async changePassword(userId, currentPassword, newPassword, requestInfo) {
+    try {
+      const { ipAddress, userAgent } = requestInfo;
+
+      // Obtener usuario con contraseña para validar
+      const user = await this.userRepository.model
+        .findById(userId)
+        .select("+passwordHash");
+
+      if (!user) {
+        throw new AuthError(
+          "Usuario no encontrado",
+          AuthErrorCodes.USER_NOT_FOUND,
+          404
+        );
+      }
+
+      // Validar contraseña actual
+      const isCurrentValid = await bcrypt.compare(
+        currentPassword,
+        user.passwordHash
+      );
+      if (!isCurrentValid) {
+        throw new AuthError(
+          "Contraseña actual incorrecta",
+          AuthErrorCodes.INVALID_CREDENTIALS,
+          401
+        );
+      }
+
+      // Validar nueva contraseña
+      const passwordValidation = this.validatePasswordStrength(newPassword);
+      if (!passwordValidation.isValid) {
+        throw new AuthError(
+          `Contraseña débil: ${passwordValidation.errors.join(", ")}`,
+          AuthErrorCodes.WEAK_PASSWORD,
+          400
+        );
+      }
+
+      // Cambiar contraseña usando repository
+      const sessionData = {
+        userId,
+        ip: ipAddress,
+        userAgent,
+        action: "password_change",
+      };
+
+      await this.userRepository.setPassword(userId, newPassword, sessionData);
+
+      console.log(`✅ Contraseña cambiada empresarialmente: Usuario ${userId}`);
+
+      return {
+        success: true,
+        message: "Contraseña actualizada exitosamente",
+      };
+    } catch (error) {
+      console.error("Error cambiando contraseña empresarial:", error);
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError(
+        "Error interno cambiando contraseña",
+        AuthErrorCodes.PASSWORD_CHANGE_FAILED,
+        500
+      );
+    }
+  }
+
+  /**
+   * Refrescar tokens (mejorado con validación de políticas)
+   */
+  async refreshTokens(sessionToken, requestInfo) {
+    try {
+      const { ipAddress, userAgent, deviceFingerprint } = requestInfo;
+
+      // Usar validación avanzada del repository
+      const validationResult =
+        await this.sessionRepository.validateSessionWithPolicy(sessionToken, {
+          deviceFingerprint,
+          ipAddress,
+          userAgent,
+        });
+
+      if (!validationResult.valid) {
+        throw new AuthError(
+          "Sesión inválida para renovación",
+          AuthErrorCodes.SESSION_INVALID,
+          401
+        );
+      }
+
+      // Generar nuevos tokens
+      const newTokens = this.generateSecureTokens();
+
+      // Actualizar tokens usando funcionalidad del repository
+      await this.sessionRepository.rotateTokens(
+        validationResult.session.sessionId,
+        newTokens.accessToken,
+        newTokens.refreshToken,
+        {
+          userId: validationResult.userId,
+          ip: ipAddress,
+          userAgent,
+          action: "token_refresh",
+        }
+      );
+
+      console.log(
+        `🔄 Tokens empresariales renovados para sesión: ${validationResult.session.sessionId}`
+      );
+
+      return {
+        success: true,
+        expiresAt: validationResult.session.expiresAt,
+        message: "Tokens renovados exitosamente",
+      };
+    } catch (error) {
+      console.error("Error renovando tokens empresariales:", error);
+      if (error instanceof AuthError) {
+        throw error;
+      }
+      throw new AuthError(
+        "Error renovando tokens",
+        AuthErrorCodes.TOKEN_REFRESH_FAILED,
+        500
+      );
+    }
   }
 }

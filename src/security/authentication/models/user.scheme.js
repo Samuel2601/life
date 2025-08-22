@@ -252,6 +252,34 @@ const UserSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
       },
+      showInSearch: {
+        type: Boolean,
+        default: true,
+      },
+      allowBusinessContact: {
+        type: Boolean,
+        default: true,
+      },
+      shareAnalytics: {
+        type: Boolean,
+        default: false,
+      },
+      allowPersonalization: {
+        type: Boolean,
+        default: false,
+      },
+      shareWithPartners: {
+        type: Boolean,
+        default: false,
+      },
+      allowCookies: {
+        type: Boolean,
+        default: false,
+      },
+      dataRetentionPeriod: {
+        type: String,
+        default: "2years",
+      },
     },
   },
 
