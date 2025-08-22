@@ -315,6 +315,12 @@ UserSchema.index({ "preferences.language": 1 });
 UserSchema.index({ "metadata.lastActiveAt": -1 });
 UserSchema.index({ lastLoginAt: -1 });
 
+UserSchema.index({
+  "profile.firstName": 1,
+  "profile.lastName": 1,
+  email: 1,
+});
+
 // Índice de texto para búsqueda
 UserSchema.index(
   {
@@ -523,11 +529,6 @@ UserSchema.methods.generatePasswordResetToken = function () {
   this.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
   return token;
-};
-
-UserSchema.methods.comparePassword = async function (candidatePassword) {
-  if (!this.passwordHash) return false;
-  return await bcrypt.compare(candidatePassword, this.passwordHash);
 };
 
 UserSchema.methods.createPasswordResetToken = function () {

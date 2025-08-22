@@ -1,3 +1,7 @@
+// =============================================================================
+// src/modules/core/repositories/base.repository.js - VERSIÓN MEJORADA
+// Con capacidades avanzadas de agregación y búsquedas complejas
+// =============================================================================
 import { Types } from "mongoose";
 import { AuditRepository } from "../../../security/audit/repositories/audit.repository.js";
 
@@ -5,7 +9,69 @@ export class BaseRepository {
   constructor(model) {
     this.model = model;
     this.modelName = model.modelName;
+
+    // Configuración por defecto para agregaciones
+    this.defaultLookups = new Map();
+    this.defaultProjections = new Map();
+
+    this.initializeDefaultConfig();
   }
+
+  /**
+   * Inicializar configuración por defecto para el modelo
+   */
+  initializeDefaultConfig() {
+    // Configurar lookups comunes basados en refs del schema
+    const schemaObj = this.model.schema.obj;
+    this.autoDetectLookups(schemaObj);
+  }
+
+  /**
+   * Auto-detectar relaciones para lookups automáticos
+   */
+  autoDetectLookups(schemaObj, prefix = "") {
+    for (const [field, definition] of Object.entries(schemaObj)) {
+      if (definition.ref) {
+        this.defaultLookups.set(prefix + field, {
+          from: this.getCollectionName(definition.ref),
+          localField: prefix + field,
+          foreignField: "_id",
+          as: prefix + field,
+          model: definition.ref,
+        });
+      } else if (Array.isArray(definition) && definition[0]?.ref) {
+        this.defaultLookups.set(prefix + field, {
+          from: this.getCollectionName(definition[0].ref),
+          localField: prefix + field,
+          foreignField: "_id",
+          as: prefix + field,
+          model: definition[0].ref,
+        });
+      } else if (definition.type && typeof definition.type === "object") {
+        this.autoDetectLookups(definition.type, prefix + field + ".");
+      }
+    }
+  }
+
+  /**
+   * Obtener nombre de colección desde nombre de modelo
+   */
+  getCollectionName(modelName) {
+    // Convertir nombre de modelo a nombre de colección (pluralizado y en minúsculas)
+    const collectionNames = {
+      User: "users",
+      Role: "roles",
+      Business: "businesses",
+      UserSession: "usersessions",
+      Address: "addresses",
+      Review: "reviews",
+      Category: "categories",
+    };
+
+    return collectionNames[modelName] || modelName.toLowerCase() + "s";
+  }
+
+  // ===== MÉTODOS CRUD BÁSICOS =====
 
   /**
    * Crear nuevo documento
@@ -18,7 +84,7 @@ export class BaseRepository {
         updatedBy: userData.userId,
       });
 
-      return await document.save(options); // <- aquí se aplica la sesión si viene
+      return await document.save(options);
     } catch (error) {
       console.log(error);
       throw new Error(`Error creando ${this.modelName}: ${error.message}`);
@@ -46,14 +112,11 @@ export class BaseRepository {
       includeDeleted = false,
     } = options;
 
-    // Clonar el query base (para no mutarlo)
     const baseQuery = { ...query };
-
-    // Construir filtro para eliminados - CORRECCIÓN AQUÍ
     const deletedFilter = includeDeleted
       ? {}
       : { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
-    // Combinar correctamente usando $and si es necesario
+
     const finalQuery =
       Object.keys(baseQuery).length > 0
         ? { $and: [baseQuery, deletedFilter] }
@@ -68,37 +131,26 @@ export class BaseRepository {
       lean: true,
     });
   }
+
   /**
    * Obtener documento por ID
-   * @param {string} id - ID del documento
-   * @param {object} options - Opciones adicionales
-   * @param {string|array|object} options.populate - Campos a popular
-   * @param {boolean} options.includeDeleted - Incluir documentos eliminados
-   * @param {boolean} options.lean - Usar lean() (true por defecto)
    */
   async findById(id, options = {}) {
     try {
-      // Validar que el ID sea un ObjectId válido
       if (!Types.ObjectId.isValid(id)) {
         throw new Error("ID no válido");
       }
 
-      const {
-        populate = "",
-        includeDeleted = false,
-        lean = true, // Lean activado por defecto
-      } = options;
+      const { populate = "", includeDeleted = false, lean = true } = options;
 
       const query = this.model.findById(id);
 
-      // Solo aplicar filtro de eliminación si no se incluyen los eliminados
       if (!includeDeleted) {
         query.where({
           $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
         });
       }
 
-      // Aplicar populate si se especificó
       if (Array.isArray(populate)) {
         for (const p of populate) {
           query.populate(p);
@@ -107,7 +159,6 @@ export class BaseRepository {
         query.populate(populate);
       }
 
-      // Aplicar lean sólo si se especifica (o por defecto true)
       if (lean) {
         query.lean();
       }
@@ -118,7 +169,6 @@ export class BaseRepository {
         throw new Error("Documento no encontrado");
       }
 
-      // Si se usó lean pero necesitamos los métodos, convertimos a instancia
       if (lean && options.returnInstance) {
         return this.model.hydrate(document);
       }
@@ -139,20 +189,17 @@ export class BaseRepository {
     }
 
     try {
-      // Obtener documento original
       const originalDoc = await this.model.findById(id).lean();
       if (!originalDoc || originalDoc.deletedAt) {
         throw new Error("Documento no encontrado");
       }
 
-      // Preparar datos de actualización
       const dataToUpdate = {
         ...updateData,
         updatedBy: userData.userId,
         updatedAt: new Date(),
       };
 
-      // Usar session para transacciones si es necesario
       const session = options.session;
       const updateOptions = {
         new: true,
@@ -161,14 +208,12 @@ export class BaseRepository {
         ...options,
       };
 
-      // Actualizar documento
       const updatedDoc = await this.model.findByIdAndUpdate(
         id,
         dataToUpdate,
         updateOptions
       );
 
-      // Guardar auditoría de cambios
       try {
         await AuditRepository.saveUpdateWithDetection(
           {
@@ -182,7 +227,6 @@ export class BaseRepository {
         );
       } catch (auditError) {
         console.error("Error en auditoría:", auditError);
-        // No fallar la actualización por error de auditoría
       }
 
       return updatedDoc;
@@ -191,9 +235,356 @@ export class BaseRepository {
       throw error;
     }
   }
+
+  // ===== MÉTODOS DE AGREGACIÓN AVANZADOS =====
+
   /**
-   * Eliminación suave (soft delete)
+   * Búsqueda usando agregación MongoDB con lookups automáticos
+   * @param {Object} config - Configuración de la búsqueda
    */
+  async searchWithAggregation(config) {
+    try {
+      const {
+        filters = {},
+        options = {},
+        lookups = [],
+        customPipeline = [],
+        enableAutoLookups = true,
+      } = config;
+
+      console.log(
+        `🔍 Búsqueda con agregación para ${this.modelName}:`,
+        filters
+      );
+
+      const {
+        page = 1,
+        limit = 10,
+        sort = { createdAt: -1 },
+        includeDeleted = false,
+      } = options;
+
+      const skip = (page - 1) * limit;
+
+      // Construir pipeline de agregación
+      const pipeline = [];
+
+      // 1. Match inicial - filtrar documentos eliminados
+      const initialMatch = includeDeleted
+        ? {}
+        : {
+            $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+          };
+
+      if (Object.keys(initialMatch).length > 0) {
+        pipeline.push({ $match: initialMatch });
+      }
+
+      // 2. Lookups automáticos si están habilitados
+      if (enableAutoLookups) {
+        for (const [field, lookupConfig] of this.defaultLookups) {
+          pipeline.push({
+            $lookup: {
+              from: lookupConfig.from,
+              localField: lookupConfig.localField,
+              foreignField: lookupConfig.foreignField,
+              as: lookupConfig.as,
+              pipeline: this.getDefaultProjectionPipeline(lookupConfig.model),
+            },
+          });
+
+          // Unwind si no es array
+          if (!Array.isArray(this.model.schema.obj[field])) {
+            pipeline.push({
+              $unwind: {
+                path: `$${lookupConfig.as}`,
+                preserveNullAndEmptyArrays: true,
+              },
+            });
+          }
+        }
+      }
+
+      // 3. Lookups personalizados
+      for (const lookup of lookups) {
+        pipeline.push({ $lookup: lookup });
+
+        // Auto-unwind si se especifica
+        if (lookup.unwind) {
+          pipeline.push({
+            $unwind: {
+              path: `$${lookup.as}`,
+              preserveNullAndEmptyArrays: lookup.preserveNull !== false,
+            },
+          });
+        }
+      }
+
+      // 4. Pipeline personalizado (antes del match de filtros)
+      pipeline.push(...customPipeline);
+
+      // 5. Match de filtros de búsqueda
+      const searchMatch = this.buildSearchMatch(filters);
+      if (Object.keys(searchMatch).length > 0) {
+        pipeline.push({ $match: searchMatch });
+      }
+
+      // 6. Facet para datos y conteo
+      pipeline.push({
+        $facet: {
+          data: [{ $sort: sort }, { $skip: skip }, { $limit: limit }],
+          totalCount: [{ $count: "count" }],
+        },
+      });
+
+      console.log(
+        "🔍 Ejecutando pipeline de agregación:",
+        JSON.stringify(pipeline, null, 2)
+      );
+      const result = await this.model.aggregate(pipeline);
+
+      const docs = result[0]?.data || [];
+      const totalDocs = result[0]?.totalCount[0]?.count || 0;
+      const totalPages = Math.ceil(totalDocs / limit);
+
+      console.log("✅ Agregación completada:", {
+        docs: docs.length,
+        totalDocs,
+        totalPages,
+      });
+
+      // Retornar en formato compatible con mongoose-paginate-v2
+      return {
+        docs,
+        totalDocs,
+        totalPages,
+        page,
+        limit,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+        nextPage: page < totalPages ? page + 1 : null,
+        prevPage: page > 1 ? page - 1 : null,
+        pagingCounter: (page - 1) * limit + 1,
+      };
+    } catch (error) {
+      console.error("❌ Error en agregación:", error);
+      throw new Error(`Error en búsqueda con agregación: ${error.message}`);
+    }
+  }
+
+  /**
+   * Construir match de búsqueda desde filtros
+   */
+  buildSearchMatch(filters) {
+    const match = {};
+    const {
+      search,
+      text,
+      dateFrom,
+      dateTo,
+      createdBy,
+      updatedBy,
+      isActive,
+      ...otherFilters
+    } = filters;
+
+    // Búsqueda de texto genérica
+    if (search || text) {
+      const searchText = search || text;
+      const textFields = this.getTextSearchFields();
+
+      if (textFields.length > 0) {
+        match.$or = textFields.map((field) => ({
+          [field]: { $regex: searchText, $options: "i" },
+        }));
+      }
+    }
+
+    // Filtro por rango de fechas
+    if (dateFrom || dateTo) {
+      match.createdAt = {};
+      if (dateFrom) match.createdAt.$gte = new Date(dateFrom);
+      if (dateTo) match.createdAt.$lte = new Date(dateTo);
+    }
+
+    // Filtros de auditoría
+    if (createdBy) match.createdBy = new Types.ObjectId(createdBy);
+    if (updatedBy) match.updatedBy = new Types.ObjectId(updatedBy);
+    if (isActive !== undefined) match.isActive = isActive;
+
+    // Otros filtros específicos
+    Object.assign(match, otherFilters);
+
+    return match;
+  }
+
+  /**
+   * Obtener campos para búsqueda de texto
+   */
+  getTextSearchFields() {
+    const fields = [];
+    const schemaObj = this.model.schema.obj;
+
+    for (const [field, definition] of Object.entries(schemaObj)) {
+      if (
+        definition.type === String &&
+        !field.includes("password") &&
+        !field.includes("token")
+      ) {
+        fields.push(field);
+      }
+    }
+
+    return fields;
+  }
+
+  /**
+   * Obtener pipeline de proyección por defecto para un modelo
+   */
+  getDefaultProjectionPipeline(modelName) {
+    const commonExclusions = {
+      __v: 0,
+      deletedAt: 0,
+      deletedBy: 0,
+      deletionReason: 0,
+    };
+
+    const modelSpecificExclusions = {
+      User: {
+        passwordHash: 0,
+        emailVerificationToken: 0,
+        passwordResetToken: 0,
+      },
+      UserSession: { accessTokenHash: 0, refreshTokenHash: 0, sessionToken: 0 },
+    };
+
+    const exclusions = {
+      ...commonExclusions,
+      ...(modelSpecificExclusions[modelName] || {}),
+    };
+
+    return [{ $project: exclusions }];
+  }
+
+  /**
+   * Búsqueda específica con joins complejos
+   * @param {Object} config - Configuración específica del modelo
+   */
+  async findWithJoins(config) {
+    const {
+      baseMatch = {},
+      joins = [],
+      searchFields = [],
+      searchText = "",
+      sort = { createdAt: -1 },
+      page = 1,
+      limit = 10,
+    } = config;
+
+    const pipeline = [];
+
+    // Match inicial
+    pipeline.push({
+      $match: {
+        ...baseMatch,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      },
+    });
+
+    // Joins especificados
+    for (const join of joins) {
+      pipeline.push({ $lookup: join });
+
+      if (join.unwind) {
+        pipeline.push({
+          $unwind: {
+            path: `$${join.as}`,
+            preserveNullAndEmptyArrays: true,
+          },
+        });
+      }
+    }
+
+    // Búsqueda en campos relacionados
+    if (searchText && searchFields.length > 0) {
+      pipeline.push({
+        $match: {
+          $or: searchFields.map((field) => ({
+            [field]: { $regex: searchText, $options: "i" },
+          })),
+        },
+      });
+    }
+
+    // Paginación y resultado
+    const skip = (page - 1) * limit;
+
+    pipeline.push({
+      $facet: {
+        data: [{ $sort: sort }, { $skip: skip }, { $limit: limit }],
+        totalCount: [{ $count: "count" }],
+      },
+    });
+
+    const result = await this.model.aggregate(pipeline);
+
+    const docs = result[0]?.data || [];
+    const totalDocs = result[0]?.totalCount[0]?.count || 0;
+    const totalPages = Math.ceil(totalDocs / limit);
+
+    return {
+      docs,
+      totalDocs,
+      totalPages,
+      page,
+      limit,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+      nextPage: page < totalPages ? page + 1 : null,
+      prevPage: page > 1 ? page - 1 : null,
+      pagingCounter: (page - 1) * limit + 1,
+    };
+  }
+
+  /**
+   * Estadísticas usando agregación
+   */
+  async getStatsWithAggregation(config = {}) {
+    const {
+      groupBy = null,
+      dateField = "createdAt",
+      filters = {},
+      customPipeline = [],
+    } = config;
+
+    const pipeline = [];
+
+    // Match inicial
+    const match = {
+      ...filters,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    };
+    pipeline.push({ $match: match });
+
+    // Pipeline personalizado
+    pipeline.push(...customPipeline);
+
+    // Agrupación
+    const groupStage = {
+      _id: groupBy,
+      count: { $sum: 1 },
+      firstDate: { $min: `$${dateField}` },
+      lastDate: { $max: `$${dateField}` },
+    };
+
+    pipeline.push({ $group: groupStage });
+    pipeline.push({ $sort: { count: -1 } });
+
+    return await this.model.aggregate(pipeline);
+  }
+
+  // ===== MÉTODOS AUXILIARES EXISTENTES =====
+
   async softDelete(id, userData) {
     if (!Types.ObjectId.isValid(id)) {
       throw new Error("ID no válido");
@@ -204,28 +595,22 @@ export class BaseRepository {
       throw new Error("Documento no encontrado");
     }
 
-    // Marcar como eliminado
     document.deletedBy = userData.userId;
     document.deletedAt = new Date();
 
     return await document.save();
   }
 
-  /**
-   * Eliminación forzada con auditoría
-   */
   async forceDelete(id, userData) {
     if (!Types.ObjectId.isValid(id)) {
       throw new Error("ID no válido");
     }
 
-    // Obtener documento antes de eliminar
     const documentToDelete = await this.model.findById(id).lean();
     if (!documentToDelete) {
       throw new Error("Documento no encontrado");
     }
 
-    // Guardar respaldo en auditoría
     await AuditRepository.saveDeleteBackup({
       schema: this.modelName,
       documentId: id,
@@ -233,15 +618,11 @@ export class BaseRepository {
       userData,
     });
 
-    // Eliminar documento
     await this.model.findByIdAndDelete(id);
 
     return { message: "Documento eliminado permanentemente" };
   }
 
-  /**
-   * Restaurar documento eliminado (soft delete)
-   */
   async restore(id, userData) {
     if (!Types.ObjectId.isValid(id)) {
       throw new Error("ID no válido");
@@ -255,7 +636,6 @@ export class BaseRepository {
       throw new Error("Documento no está eliminado");
     }
 
-    // Restaurar documento
     document.deletedBy = undefined;
     document.deletedAt = undefined;
     document.updatedBy = userData.userId;
@@ -263,9 +643,7 @@ export class BaseRepository {
 
     return await document.save();
   }
-  /**
-   * Obtener historial de auditoría de un documento
-   */
+
   async getAuditHistory(id, options = {}) {
     return await AuditRepository.getDocumentHistory(
       id,
@@ -274,32 +652,21 @@ export class BaseRepository {
     );
   }
 
-  /**
-   * Búsqueda con filtros avanzados
-   */
   async search(searchParams, options = {}) {
     const { text, dateFrom, dateTo, createdBy, ...otherFilters } = searchParams;
 
     let query = { ...otherFilters };
 
-    // Excluir eliminados
-    /*if (!options.includeDeleted) {
-      query.deletedAt = { $exists: false };
-    }*/
-
-    // Búsqueda por texto (requiere índice de texto en el modelo)
     if (text) {
       query.$text = { $search: text };
     }
 
-    // Filtro por rango de fechas
     if (dateFrom || dateTo) {
       query.createdAt = {};
       if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
       if (dateTo) query.createdAt.$lte = new Date(dateTo);
     }
 
-    // Filtro por creador
     if (createdBy) {
       query.createdBy = new Types.ObjectId(createdBy);
     }
@@ -307,25 +674,19 @@ export class BaseRepository {
     return await this.findAll(query, options);
   }
 
-  /**
-   * Actualización en lote con auditoría
-   */
   async updateMany(filter, updateData, userData) {
-    // Obtener documentos que serán actualizados
     const docsToUpdate = await this.model.find(filter).lean();
 
     if (docsToUpdate.length === 0) {
       return { modifiedCount: 0 };
     }
 
-    // Actualizar documentos
     const result = await this.model.updateMany(filter, {
       ...updateData,
       updatedBy: userData.userId,
       updatedAt: new Date(),
     });
 
-    // Auditar cada documento actualizado
     for (const originalDoc of docsToUpdate) {
       try {
         const updatedDoc = await this.model.findById(originalDoc._id).lean();
