@@ -5,7 +5,7 @@
 import { Types } from "mongoose";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { User } from "../models/user.scheme.js";
+import { User } from "../models/user/index.js";
 import { TransactionHelper } from "../../../utils/transsaccion.helper.js";
 import { BaseRepository } from "../../../modules/core/repositories/base.repository.js";
 
@@ -53,9 +53,8 @@ export class UserRepository extends BaseRepository {
               phone: userData.profile?.phone || null,
               bio: userData.profile?.bio || null,
               website: userData.profile?.website || null,
-              isActive: true,
             },
-
+            isActive: true,
             // Metadatos empresariales completos
             metadata: {
               registrationSource: userData.registrationSource || "web",
@@ -71,6 +70,7 @@ export class UserRepository extends BaseRepository {
                 utmSource: userData.utmSource || null,
                 utmMedium: userData.utmMedium || null,
                 utmCampaign: userData.utmCampaign || null,
+                companyContext: userData.companyContext || null,
               },
 
               // Configuración de actividad
@@ -85,6 +85,15 @@ export class UserRepository extends BaseRepository {
                 lastPreferencesUpdate: new Date(),
                 lastSecurityUpdate: new Date(),
                 lastPrivacyUpdate: new Date(),
+              },
+
+              privacyFlags: {
+                dataConsentRevoked:
+                  userData.privacyFlags?.dataConsentRevoked || false,
+                dataConsentRevokedAt:
+                  userData.privacyFlags?.dataConsentRevokedAt || null,
+                requiresDataDeletion:
+                  userData.privacyFlags?.requiresDataDeletion || false,
               },
             },
 
@@ -148,6 +157,15 @@ export class UserRepository extends BaseRepository {
 
             // Roles iniciales
             roles: userData.roles || [],
+            isEmailVerified: userData.isEmailVerified || false,
+
+            //Campos de seguridad
+            loginAttempts: 0,
+            lockUntil: null,
+            passwordResetToken: null,
+            passwordResetExpires: null,
+            emailVerificationToken: null,
+            emailVerificationExpires: null,
           };
 
           const user = await this.create(newUserData, sessionData, { session });
