@@ -1,0 +1,218 @@
+classDiagram
+    %% ==================== CLASES BASE ====================
+    class BaseSchema {
+        <<Abstract>>
+        #isDeleted: Boolean
+        #deletedAt: Date
+        #deletedBy: ObjectId
+        #deletionReason: String
+        #createdAt: Date
+        #createdBy: ObjectId
+        #updatedAt: Date
+        #updatedBy: ObjectId
+        #version: Number
+        #lastChangeReason: String
+        +softDelete(deletedBy, reason)
+        +restore(restoredBy, reason)
+        +getAuditInfo()
+    }
+
+    class MultiLanguageContent {
+        -original: OriginalContent
+        -translations: Map~String, Translation~
+        -translationConfig: Object
+        -lastUpdated: Date
+        +getText(language, fallbackLanguages)
+        +addTranslation(language, text, options)
+        +hasTranslation(language)
+        +needsTranslationUpdate(language)
+    }
+
+    %% ==================== MODELOS PRINCIPALES ====================
+    class User {
+        -email: String
+        -passwordHash: String
+        -profile: UserProfile
+        -oauthProviders: Object
+        -roles: ObjectId[]
+        -isEmailVerified: Boolean
+        -preferences: Object
+        +validatePassword(password)
+        +setPassword(password)
+        +connectOAuthProvider(provider, providerData)
+        +updatePreferences(newPreferences)
+        +generateEmailVerificationToken()
+        +generatePasswordResetToken()
+    }
+
+    class Role {
+        -roleName: String
+        -displayName: MultiLanguageContent
+        -description: MultiLanguageContent
+        -permissions: Permission[]
+        -hierarchy: Number
+        -roleType: String
+        +hasPermission(resource, action, scope)
+        +addPermission(resource, actions, scope, conditions)
+        +removePermission(resource, action)
+        +canManageCompany(companyId)
+    }
+
+    class Business {
+        -businessName: MultiLanguageContent
+        -description: MultiLanguageContent
+        -ownerId: ObjectId
+        -categories: ObjectId[]
+        -primaryCategory: ObjectId
+        -address: ObjectId
+        -coordinates: GeoJSON
+        -contactInfo: ContactInfo
+        -operatingHours: BusinessHours[]
+        +isOpenNow()
+        +isOpenAt(date)
+        +addManager(userId, role, permissions, addedBy)
+        +canUserManage(userId)
+        +generateUniqueSlug(baseName)
+    }
+
+    class BusinessCategory {
+        -categoryName: MultiLanguageContent
+        -description: MultiLanguageContent
+        -parentCategory: ObjectId
+        -categorySlug: String
+        -categoryLevel: Number
+        -industryCodes: Object
+        +getHierarchy()
+        +getSubcategories(options)
+        +updateStats()
+        +calculatePopularityScore(businessCount, avgRating, totalViews)
+    }
+
+    class Address {
+        -streetAddress: String
+        -city: String
+        -state: String
+        -country: String
+        -postalCode: String
+        -location: Coordinates
+        -formattedAddress: FormattedAddress
+        -businessId: ObjectId
+        -userId: ObjectId
+        +autoFormatAddress()
+        +distanceTo(otherAddress)
+        +validateWithService(service)
+        +isWithinRadius(centerCoordinates, radiusInMeters)
+    }
+
+    class UserSession {
+        -userId: ObjectId
+        -sessionToken: String
+        -deviceFingerprint: String
+        -ipAddress: String
+        -deviceInfo: DeviceInfo
+        -location: LocationInfo
+        -isActive: Boolean
+        +isExpired()
+        +markAsCompromised(reason)
+        +logSuspiciousActivity(type, description, severity, additionalData)
+        +logFingerprintChange(newFingerprint, changedComponents)
+        +extendSession(additionalHours)
+    }
+
+    %% ==================== ESQUEMAS EMBEBIDOS ====================
+    class UserProfile {
+        -firstName: String
+        -lastName: String
+        -avatar: String
+        -dateOfBirth: Date
+        -phone: String
+        -bio: String
+        -isActive: Boolean
+    }
+
+    class Permission {
+        -resource: String
+        -actions: String[]
+        -scope: String
+        -conditions: Object
+        -geographicRestrictions: Object
+        -timeRestrictions: Object
+    }
+
+    class ContactInfo {
+        -primaryPhone: String
+        -secondaryPhone: String
+        -whatsapp: String
+        -email: String
+        -website: String
+        -socialMedia: Object
+    }
+
+    class BusinessHours {
+        -dayOfWeek: Number
+        -openTime: String
+        -closeTime: String
+        -isClosed: Boolean
+        -is24Hours: Boolean
+    }
+
+    class Coordinates {
+        -type: String
+        -coordinates: Number[]
+        -accuracy: Number
+        -source: String
+        -verifiedAt: Date
+    }
+
+    class DeviceInfo {
+        -browser: String
+        -os: String
+        -device: String
+        -deviceType: String
+        -timezone: String
+        -language: String
+        -hardwareConcurrency: Number
+    }
+
+    class LocationInfo {
+        -country: String
+        -city: String
+        -region: String
+        -coordinates: Number[]
+        -isVpnDetected: Boolean
+        -isp: String
+        -isEuCountry: Boolean
+    }
+
+    %% ==================== RELACIONES ====================
+    User "1" -- "*" UserSession : tiene
+    User "1" -- "*" Role : tiene
+    User "1" -- "*" Business : es_propietario_de
+    User "1" -- "0..1" Address : tiene
+    
+    Business "1" -- "*" BusinessCategory : tiene_categorías
+    Business "1" -- "1" Address : tiene_ubicación
+    
+    BusinessCategory "1" -- "0..1" BusinessCategory : tiene_padre
+    BusinessCategory "1" -- "*" BusinessCategory : tiene_hijos
+    
+    Role "1" -- "0..1" Role : tiene_padre
+    
+    BaseSchema <|-- User
+    BaseSchema <|-- Role
+    BaseSchema <|-- Business
+    BaseSchema <|-- BusinessCategory
+    BaseSchema <|-- Address
+    BaseSchema <|-- UserSession
+
+    User *-- UserProfile : contiene
+    Role *-- Permission : contiene
+    Business *-- ContactInfo : contiene
+    Business *-- BusinessHours : contiene
+    Address *-- Coordinates : contiene
+    UserSession *-- DeviceInfo : contiene
+    UserSession *-- LocationInfo : contiene
+
+    MultiLanguageContent <|.. Business : utiliza
+    MultiLanguageContent <|.. BusinessCategory : utiliza
+    MultiLanguageContent <|.. Role : utiliza
