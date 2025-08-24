@@ -61,12 +61,6 @@ const UserProfileSchema = new mongoose.Schema(
       type: String,
       validate: CommonValidators.url,
     },
-    // Estado de registro
-    isActive: {
-      type: Boolean,
-      default: true,
-      index: true,
-    },
   },
   { _id: false }
 );
@@ -102,6 +96,227 @@ const OAuthProviderSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const RegistrationDetailsSchema = new mongoose.Schema(
+  {
+    ipAddress: {
+      type: String,
+      default: "unknown",
+      maxlength: 45, // IPv6 max length
+    },
+    userAgent: {
+      type: String,
+      default: "unknown",
+      maxlength: 500,
+    },
+    referrer: {
+      type: String,
+      maxlength: 500,
+      default: null,
+    },
+    utmSource: {
+      type: String,
+      maxlength: 100,
+      default: null,
+    },
+    utmMedium: {
+      type: String,
+      maxlength: 100,
+      default: null,
+    },
+    utmCampaign: {
+      type: String,
+      maxlength: 100,
+      default: null,
+    },
+    companyContext: {
+      type: String,
+      maxlength: 200,
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
+const ActivityTrackingSchema = new mongoose.Schema(
+  {
+    firstLogin: {
+      type: Date,
+      default: null,
+    },
+    lastPasswordChange: {
+      type: Date,
+      default: Date.now,
+    },
+    profileCompleteness: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0,
+    },
+    accountVerificationLevel: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0,
+    },
+    lastProfileUpdate: {
+      type: Date,
+      default: Date.now,
+    },
+    lastPreferencesUpdate: {
+      type: Date,
+      default: Date.now,
+    },
+    lastSecurityUpdate: {
+      type: Date,
+      default: Date.now,
+    },
+    lastPrivacyUpdate: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const PrivacyFlagsSchema = new mongoose.Schema(
+  {
+    dataConsentRevoked: {
+      type: Boolean,
+      default: false,
+    },
+    dataConsentRevokedAt: {
+      type: Date,
+      default: null,
+    },
+    requiresDataDeletion: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: false }
+);
+
+const MetadataSchema = new mongoose.Schema(
+  {
+    registrationSource: {
+      type: String,
+      enum: ["web", "mobile", "api", "oauth", "admin", "import"],
+      default: "web",
+    },
+    lastActiveAt: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+    totalLogins: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    averageSessionDuration: {
+      type: Number,
+      default: 0,
+      min: 0, // En minutos
+    },
+    registrationDetails: RegistrationDetailsSchema,
+    activityTracking: ActivityTrackingSchema,
+    privacyFlags: PrivacyFlagsSchema,
+  },
+  { _id: false }
+);
+
+const NotificationPreferencesSchema = new mongoose.Schema(
+  {
+    email: { type: Boolean, default: true },
+    push: { type: Boolean, default: true },
+    sms: { type: Boolean, default: false },
+    marketing: { type: Boolean, default: false },
+    newBusinessAlert: { type: Boolean, default: true },
+    reviewResponses: { type: Boolean, default: true },
+    weeklyDigest: { type: Boolean, default: true },
+  },
+  { _id: false }
+);
+
+const PrivacyPreferencesSchema = new mongoose.Schema(
+  {
+    profileVisible: { type: Boolean, default: true },
+    allowDataCollection: { type: Boolean, default: true },
+    allowLocationTracking: { type: Boolean, default: false },
+    showInSearch: { type: Boolean, default: true },
+    allowBusinessContact: { type: Boolean, default: true },
+    shareAnalytics: { type: Boolean, default: false },
+    allowPersonalization: { type: Boolean, default: true },
+    shareWithPartners: { type: Boolean, default: false },
+    allowCookies: { type: Boolean, default: true },
+    dataRetentionPeriod: {
+      type: String,
+      enum: ["1year", "2years", "5years", "unlimited"],
+      default: "2years",
+    },
+  },
+  { _id: false }
+);
+
+const BusinessPreferencesSchema = new mongoose.Schema(
+  {
+    preferredCategories: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "BusinessCategory",
+      },
+    ],
+    searchRadius: {
+      type: Number,
+      min: 1,
+      max: 100,
+      default: 10, // km
+    },
+    defaultSortBy: {
+      type: String,
+      enum: ["distance", "rating", "name", "newest"],
+      default: "distance",
+    },
+    showPrices: { type: Boolean, default: true },
+    autoTranslate: { type: Boolean, default: true },
+    preferredLanguages: [
+      {
+        type: String,
+        enum: SUPPORTED_LANGUAGES,
+      },
+    ],
+    notificationRadius: {
+      type: Number,
+      min: 1,
+      max: 50,
+      default: 5, // km
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema principal de preferencias de usuario
+ */
+const UserPreferencesSchema = new mongoose.Schema(
+  {
+    language: {
+      type: String,
+      enum: SUPPORTED_LANGUAGES,
+      default: DEFAULT_LANGUAGE,
+    },
+    timezone: {
+      type: String,
+      default: "America/Lima",
+    },
+    notifications: NotificationPreferencesSchema,
+    privacy: PrivacyPreferencesSchema,
+    business: BusinessPreferencesSchema, // ✅ AGREGADO: referenciado en repository
+  },
+  { _id: false }
+);
+
 /**
  * Schema principal de Usuario
  */
@@ -133,6 +348,7 @@ const UserSchema = new mongoose.Schema({
   profile: {
     type: UserProfileSchema,
     required: true,
+    default: () => ({}),
   },
 
   // OAuth providers (sin tokens - solo información de conexión)
@@ -152,6 +368,13 @@ const UserSchema = new mongoose.Schema({
     },
   ],
 
+  // Estado de cuenta
+  isActive: {
+    type: Boolean,
+    default: true,
+    index: true,
+  },
+
   isEmailVerified: {
     type: Boolean,
     default: false,
@@ -166,6 +389,7 @@ const UserSchema = new mongoose.Schema({
 
   emailVerificationExpires: {
     type: Date,
+    select: false,
   },
 
   // Seguridad
@@ -177,15 +401,12 @@ const UserSchema = new mongoose.Schema({
 
   passwordResetExpires: {
     type: Date,
+    select: false,
   },
 
   lastLoginAt: {
     type: Date,
     index: true,
-  },
-
-  lastLoginIP: {
-    type: String,
   },
 
   loginAttempts: {
@@ -211,102 +432,15 @@ const UserSchema = new mongoose.Schema({
 
   // Preferencias de usuario
   preferences: {
-    language: {
-      type: String,
-      enum: SUPPORTED_LANGUAGES,
-      default: DEFAULT_LANGUAGE,
-      index: true,
-    },
-    timezone: {
-      type: String,
-      default: "America/Lima",
-    },
-    notifications: {
-      email: {
-        type: Boolean,
-        default: true,
-      },
-      push: {
-        type: Boolean,
-        default: true,
-      },
-      sms: {
-        type: Boolean,
-        default: false,
-      },
-      marketing: {
-        type: Boolean,
-        default: false,
-      },
-    },
-    privacy: {
-      profileVisible: {
-        type: Boolean,
-        default: true,
-      },
-      allowDataCollection: {
-        type: Boolean,
-        default: true,
-      },
-      allowLocationTracking: {
-        type: Boolean,
-        default: false,
-      },
-      showInSearch: {
-        type: Boolean,
-        default: true,
-      },
-      allowBusinessContact: {
-        type: Boolean,
-        default: true,
-      },
-      shareAnalytics: {
-        type: Boolean,
-        default: false,
-      },
-      allowPersonalization: {
-        type: Boolean,
-        default: false,
-      },
-      shareWithPartners: {
-        type: Boolean,
-        default: false,
-      },
-      allowCookies: {
-        type: Boolean,
-        default: false,
-      },
-      dataRetentionPeriod: {
-        type: String,
-        default: "2years",
-      },
-    },
+    type: UserPreferencesSchema,
+    default: () => ({}),
   },
 
   // Metadatos adicionales
   metadata: {
-    registrationSource: {
-      type: String,
-      enum: ["web", "mobile", "api", "oauth", "invitation"],
-      default: "web",
-    },
-    lastActiveAt: {
-      type: Date,
-      default: Date.now,
-      index: true,
-    },
-    totalLogins: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    averageSessionDuration: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
+    type: MetadataSchema,
+    default: () => ({}),
   },
-
   // Campos base (auditoría, soft delete, etc.)
   ...BaseSchemeFields,
 });
