@@ -11,17 +11,3 @@ export { OAuthSessionDataSchema } from "./oauth-session.schema.js";
 export { SessionCoreSchema } from "./session-core.schema.js";
 export { SecuritySchema } from "./security.schema.js";
 export { MetadataSchema } from "./metadata.schema.js";
-
-// Función para combinar todos los schemas
-export const combineUserSessionSchemas = () => {
-  return {
-    ...DeviceInfoSchema,
-    ...LocationInfoSchema,
-    ...SuspiciousActivitySchema,
-    ...FingerprintChangeSchema,
-    ...OAuthSessionDataSchema,
-    ...SessionCoreSchema,
-    ...SecuritySchema,
-    ...MetadataSchema,
-  };
-};
