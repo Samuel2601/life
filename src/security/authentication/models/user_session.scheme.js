@@ -1,16 +1,101 @@
 // =============================================================================
-// src/security/authentication/models/user_session.scheme.js - OPTIMIZADO
-// Mantiene toda la seguridad y funcionalidad, optimiza para tu caso de uso
+// src/security/authentication/models/user_session.scheme.js - ESTANDARIZADO
+// Aplicando base.scheme.js y patrones avanzados con camelCase consistente
 // =============================================================================
 import mongoose from "mongoose";
 import crypto from "crypto";
 import {
   BaseSchemaFields,
   setupBaseSchema,
+  CommonValidators,
 } from "../../../modules/core/models/base.scheme.js";
 
 /**
- * Schema para información del dispositivo (optimizado para geolocalización empresarial)
+ * CONSTANTES Y CONFIGURACIÓN
+ */
+export const SESSION_CONSTANTS = {
+  TOKEN_LENGTH: 64,
+  HASH_LENGTH: 64,
+  MAX_INACTIVITY_MINUTES: 43200, // 30 días máximo
+  MIN_INACTIVITY_MINUTES: 5,
+  MAX_CONCURRENT_SESSIONS: 10,
+  MAX_SUSPICIOUS_ACTIVITIES: 50,
+  MAX_FINGERPRINT_CHANGES: 20,
+  FINGERPRINT_SIMILARITY_THRESHOLD: 0.6,
+  RISK_SCORE_MAX: 100,
+  SESSION_CLEANUP_DAYS: 30,
+};
+
+export const DEVICE_TYPES = ["desktop", "mobile", "tablet", "unknown"];
+export const OAUTH_PROVIDERS = [
+  "google",
+  "facebook",
+  "apple",
+  "microsoft",
+  "linkedin",
+];
+export const CREATION_METHODS = [
+  "password",
+  "oauth",
+  "sso",
+  "tokenRefresh",
+  "magicLink",
+];
+
+export const INVALIDATION_REASONS = [
+  "userLogout",
+  "tokenExpired",
+  "securityBreach",
+  "adminAction",
+  "deviceChange",
+  "locationChange",
+  "suspiciousActivity",
+  "maxSessionsExceeded",
+  "passwordChanged",
+  "accountLocked",
+  "gdprRequest",
+  "complianceViolation",
+];
+
+export const ACTIVITY_TYPES = [
+  "deviceChange",
+  "locationChange",
+  "unusualAccess",
+  "concurrentSession",
+  "fingerprintMismatch",
+  "rapidRequests",
+  "unusualTiming",
+  "ipChange",
+  "botDetected",
+  "scrapingAttempt",
+  "bruteForce",
+  "privilegeEscalation",
+];
+
+export const SEVERITY_LEVELS = ["low", "medium", "high", "critical"];
+export const AUTOMATIC_ACTIONS = [
+  "none",
+  "warn",
+  "block",
+  "terminate",
+  "escalate",
+];
+export const CHANGE_TYPES = ["minor", "major", "suspicious", "critical"];
+export const COMPONENT_TYPES = [
+  "userAgent",
+  "language",
+  "timezone",
+  "screen",
+  "plugins",
+  "fonts",
+  "canvas",
+  "webgl",
+  "audio",
+  "hardware",
+];
+
+/**
+ * Schema para información del dispositivo optimizado
  */
 const DeviceInfoSchema = new mongoose.Schema(
   {
@@ -19,22 +104,24 @@ const DeviceInfoSchema = new mongoose.Schema(
       required: true,
       trim: true,
       maxlength: 100,
-      index: true, // Para analytics de dispositivos
+      index: true,
     },
     browserVersion: {
       type: String,
       maxlength: 50,
+      trim: true,
     },
     os: {
       type: String,
       required: true,
       trim: true,
       maxlength: 100,
-      index: true, // Para analytics de SO
+      index: true,
     },
     osVersion: {
       type: String,
       maxlength: 50,
+      trim: true,
     },
     device: {
       type: String,
@@ -44,31 +131,43 @@ const DeviceInfoSchema = new mongoose.Schema(
     },
     deviceType: {
       type: String,
-      enum: ["desktop", "mobile", "tablet", "unknown"],
+      enum: DEVICE_TYPES,
       default: "unknown",
-      index: true, // Para analytics mobile vs desktop
+      index: true,
     },
     isMobile: {
       type: Boolean,
       default: false,
-      index: true, // Para filtrar por tipo de dispositivo
+      index: true,
     },
     screenResolution: {
       type: String,
-      maxlength: 20, // ej: "1920x1080"
+      maxlength: 20,
+      validate: {
+        validator: function (v) {
+          return !v || /^\d{3,5}x\d{3,5}$/.test(v);
+        },
+        message: "Formato de resolución inválido (ej: 1920x1080)",
+      },
     },
     timezone: {
       type: String,
       required: true,
       default: "America/Lima",
-      index: true, // Para analytics por zona horaria
+      index: true,
+      maxlength: 50,
     },
     language: {
       type: String,
-      maxlength: 10, // ej: "es-ES"
-      index: true, // Para analytics de idioma
+      maxlength: 10,
+      index: true,
+      validate: {
+        validator: function (v) {
+          return !v || /^[a-z]{2}(-[A-Z]{2})?$/.test(v);
+        },
+        message: "Formato de idioma inválido (ej: es-ES)",
+      },
     },
-    // NUEVO: Información adicional para detección de bots
     hardwareConcurrency: {
       type: Number,
       min: 1,
@@ -82,64 +181,60 @@ const DeviceInfoSchema = new mongoose.Schema(
     maxTouchPoints: {
       type: Number,
       default: 0,
+      min: 0,
     },
   },
   { _id: false }
 );
 
 /**
- * Schema para información de ubicación (mejorado para plataforma empresarial)
+ * Schema para información de ubicación mejorado
  */
 const LocationInfoSchema = new mongoose.Schema(
   {
     country: {
       type: String,
-      maxlength: 2, // Código ISO de país (ej: "PE")
+      maxlength: 2,
       uppercase: true,
-      index: true, // Para analytics por país
+      index: true,
+      validate: {
+        validator: function (v) {
+          return !v || /^[A-Z]{2}$/.test(v);
+        },
+        message: "Código de país inválido (ISO 3166-1 alpha-2)",
+      },
     },
     countryName: {
       type: String,
       maxlength: 100,
+      trim: true,
     },
     city: {
       type: String,
       maxlength: 100,
       trim: true,
-      index: true, // Para analytics por ciudad
+      index: true,
     },
     region: {
       type: String,
       maxlength: 100,
       trim: true,
-      index: true, // Para analytics por región
+      index: true,
     },
     coordinates: {
-      type: [Number], // [longitude, latitude]
-      index: "2dsphere", // Para búsquedas geográficas
-      validate: {
-        validator: function (coords) {
-          return (
-            !coords ||
-            (coords.length === 2 &&
-              coords[0] >= -180 &&
-              coords[0] <= 180 &&
-              coords[1] >= -90 &&
-              coords[1] <= 90)
-          );
-        },
-        message: "Coordenadas inválidas",
-      },
+      type: [Number],
+      index: "2dsphere",
+      validate: CommonValidators.coordinates,
     },
-    // NUEVO: Información detallada para compliance empresarial
     isVpnDetected: {
       type: Boolean,
       default: false,
-      index: true, // Para filtrar VPNs
+      index: true,
     },
     vpnProvider: {
       type: String,
       maxlength: 100,
+      trim: true,
     },
     isProxy: {
       type: Boolean,
@@ -149,13 +244,14 @@ const LocationInfoSchema = new mongoose.Schema(
     isp: {
       type: String,
       maxlength: 200,
-      index: true, // Para analytics de proveedores
+      index: true,
+      trim: true,
     },
     asn: {
       type: String,
       maxlength: 20,
+      trim: true,
     },
-    // NUEVO: Para compliance GDPR y restricciones geográficas
     isEuCountry: {
       type: Boolean,
       default: false,
@@ -175,47 +271,35 @@ const LocationInfoSchema = new mongoose.Schema(
 );
 
 /**
- * Schema para actividad sospechosa (expandido para empresa)
+ * Schema para actividad sospechosa expandido
  */
 const SuspiciousActivitySchema = new mongoose.Schema(
   {
     activityType: {
       type: String,
-      enum: [
-        "device_change",
-        "location_change",
-        "unusual_access",
-        "concurrent_session",
-        "fingerprint_mismatch",
-        "rapid_requests",
-        "unusual_timing",
-        "ip_change",
-        "bot_detected",
-        "scraping_attempt",
-        "brute_force",
-        "privilege_escalation",
-      ],
+      enum: ACTIVITY_TYPES,
       required: true,
-      index: true, // Para analytics de seguridad
+      index: true,
     },
     description: {
       type: String,
       required: true,
       maxlength: 500,
+      trim: true,
     },
     timestamp: {
       type: Date,
       default: Date.now,
       required: true,
-      index: true, // Para búsquedas temporales
+      index: true,
     },
     severity: {
       type: String,
-      enum: ["low", "medium", "high", "critical"],
+      enum: SEVERITY_LEVELS,
       default: "medium",
-      index: true, // Para filtrar por severidad
+      index: true,
     },
-    resolved: {
+    isResolved: {
       type: Boolean,
       default: false,
       index: true,
@@ -228,111 +312,122 @@ const SuspiciousActivitySchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
-    // NUEVO: Datos adicionales para análisis forense
     additionalData: {
       type: mongoose.Schema.Types.Mixed,
     },
     riskScore: {
       type: Number,
       min: 0,
-      max: 100,
+      max: SESSION_CONSTANTS.RISK_SCORE_MAX,
       default: 0,
     },
     automaticAction: {
       type: String,
-      enum: ["none", "warn", "block", "terminate", "escalate"],
+      enum: AUTOMATIC_ACTIONS,
       default: "none",
     },
+    // NUEVO: Tracking de acciones tomadas
+    actionsTaken: [
+      {
+        action: {
+          type: String,
+          enum: AUTOMATIC_ACTIONS,
+        },
+        takenAt: {
+          type: Date,
+          default: Date.now,
+        },
+        takenBy: {
+          type: String,
+          enum: ["system", "admin", "user"],
+          default: "system",
+        },
+        result: String,
+      },
+    ],
   },
   { _id: false }
 );
 
 /**
- * Schema para cambios de fingerprint (mejorado)
+ * Schema para cambios de fingerprint mejorado
  */
 const FingerprintChangeSchema = new mongoose.Schema(
   {
     newFingerprint: {
       type: String,
       required: true,
-      length: 64, // SHA-256 hash
+      length: SESSION_CONSTANTS.HASH_LENGTH,
     },
     previousFingerprint: {
       type: String,
       required: true,
-      length: 64,
+      length: SESSION_CONSTANTS.HASH_LENGTH,
     },
     changedAt: {
       type: Date,
       default: Date.now,
       required: true,
+      index: true,
     },
     changeType: {
       type: String,
-      enum: ["minor", "major", "suspicious", "critical"],
+      enum: CHANGE_TYPES,
       default: "minor",
     },
-    suspiciousChange: {
+    isSuspiciousChange: {
       type: Boolean,
       default: false,
+      index: true,
     },
-    validatedByUser: {
+    isValidatedByUser: {
       type: Boolean,
       default: false,
     },
     validatedAt: {
       type: Date,
     },
-    // NUEVO: Componentes específicos que cambiaron
     changedComponents: [
       {
         component: {
           type: String,
-          enum: [
-            "userAgent",
-            "language",
-            "timezone",
-            "screen",
-            "plugins",
-            "fonts",
-            "canvas",
-            "webgl",
-            "audio",
-            "hardware",
-          ],
+          enum: COMPONENT_TYPES,
         },
         oldValue: String,
         newValue: String,
         changeSignificance: {
           type: String,
-          enum: ["minor", "major", "critical"],
+          enum: CHANGE_TYPES,
           default: "minor",
         },
       },
     ],
-    // NUEVO: Score de similitud
     similarityScore: {
       type: Number,
       min: 0,
       max: 1,
       default: 0,
     },
-    autoBlocked: {
+    isAutoBlocked: {
       type: Boolean,
       default: false,
+    },
+    blockedReason: {
+      type: String,
+      maxlength: 200,
     },
   },
   { _id: false }
 );
 
 /**
- * Schema para datos OAuth (seguro - sin tokens)
+ * Schema para datos OAuth seguros
  */
 const OAuthSessionDataSchema = new mongoose.Schema(
   {
     provider: {
       type: String,
-      enum: ["google", "facebook", "apple", "microsoft", "linkedin"],
+      enum: OAUTH_PROVIDERS,
       required: true,
       index: true,
     },
@@ -340,22 +435,23 @@ const OAuthSessionDataSchema = new mongoose.Schema(
       type: String,
       required: true,
       index: true,
+      maxlength: 100,
     },
     email: {
       type: String,
       required: true,
+      validate: CommonValidators.email,
     },
-    // CRÍTICO: Solo almacenar hashes de tokens, NUNCA tokens directos
     tokenHash: {
       type: String,
       required: true,
-      select: false, // NUNCA incluir en queries por defecto
-      length: 64, // SHA-256 hash
+      select: false,
+      length: SESSION_CONSTANTS.HASH_LENGTH,
     },
     refreshTokenHash: {
       type: String,
       select: false,
-      length: 64,
+      length: SESSION_CONSTANTS.HASH_LENGTH,
     },
     expiresAt: {
       type: Date,
@@ -365,22 +461,215 @@ const OAuthSessionDataSchema = new mongoose.Schema(
     scope: [String],
     lastRefreshed: {
       type: Date,
+      index: true,
     },
-    // NUEVO: Metadatos del proveedor OAuth
     providerData: {
-      profilePicture: String,
-      verifiedEmail: Boolean,
-      accountType: String, // personal, business, etc.
+      profilePicture: {
+        type: String,
+        validate: CommonValidators.url,
+      },
+      isVerifiedEmail: Boolean,
+      accountType: String,
+      locale: String,
     },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de UserSession (optimizado para empresa)
+ * Schema para políticas de sesión
+ */
+const SessionPolicySchema = new mongoose.Schema(
+  {
+    requireTwoFactor: {
+      type: Boolean,
+      default: false,
+    },
+    allowedDeviceTypes: [
+      {
+        type: String,
+        enum: DEVICE_TYPES,
+      },
+    ],
+    allowedCountries: [String],
+    maxConcurrentSessions: {
+      type: Number,
+      default: 3,
+      min: 1,
+      max: SESSION_CONSTANTS.MAX_CONCURRENT_SESSIONS,
+    },
+    forceLogoutOnLocationChange: {
+      type: Boolean,
+      default: false,
+    },
+    forceLogoutOnDeviceChange: {
+      type: Boolean,
+      default: true,
+    },
+    maxInactivityMinutes: {
+      type: Number,
+      default: 30,
+      min: SESSION_CONSTANTS.MIN_INACTIVITY_MINUTES,
+      max: SESSION_CONSTANTS.MAX_INACTIVITY_MINUTES,
+    },
+    // NUEVO: Políticas avanzadas
+    riskBasedAuth: {
+      type: Boolean,
+      default: true,
+    },
+    blockHighRiskSessions: {
+      type: Boolean,
+      default: true,
+    },
+    autoLogoutOnSuspiciousActivity: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para métricas de negocio
+ */
+const BusinessMetricsSchema = new mongoose.Schema(
+  {
+    companiesAccessed: [String],
+    featuresUsed: [String],
+    apiCallsCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    avgResponseTime: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    pagesViewed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    documentsAccessed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    dataDownloaded: {
+      type: Number, // bytes
+      default: 0,
+      min: 0,
+    },
+    errorCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para compliance
+ */
+const ComplianceSchema = new mongoose.Schema(
+  {
+    isDataProcessingAgreed: {
+      type: Boolean,
+      default: false,
+    },
+    dataProcessingAgreedAt: Date,
+    isGdprApplicable: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    isAuditTrailEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    dataRetentionDays: {
+      type: Number,
+      default: 365,
+      min: 0,
+    },
+    consentVersion: {
+      type: String,
+      default: "1.0",
+    },
+    privacyPolicyVersion: {
+      type: String,
+      default: "1.0",
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema para metadatos de sesión
+ */
+const SessionMetadataSchema = new mongoose.Schema(
+  {
+    totalRequests: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lastRequestAt: {
+      type: Date,
+      index: true,
+    },
+    creationMethod: {
+      type: String,
+      enum: CREATION_METHODS,
+      default: "password",
+    },
+    sessionDuration: {
+      type: Number, // en minutos
+      min: 0,
+    },
+    businessMetrics: {
+      type: BusinessMetricsSchema,
+      default: () => ({}),
+    },
+    compliance: {
+      type: ComplianceSchema,
+      default: () => ({}),
+    },
+    // NUEVO: Métricas de seguridad
+    securityMetrics: {
+      suspiciousActivityCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      fingerprintChangesCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      loginAttemptsCount: {
+        type: Number,
+        default: 1,
+        min: 0,
+      },
+      lastSecurityCheck: Date,
+      riskLevel: {
+        type: String,
+        enum: SEVERITY_LEVELS,
+        default: "low",
+      },
+    },
+  },
+  { _id: false }
+);
+
+/**
+ * Schema principal UserSession estandarizado
  */
 const UserSessionSchema = new mongoose.Schema({
-  // Identificación de sesión
+  // Identificación básica
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -388,45 +677,53 @@ const UserSessionSchema = new mongoose.Schema({
     index: true,
   },
 
-  // CRÍTICO: Token de sesión (cookie httpOnly) - NO es un JWT
+  // Token de sesión seguro
   sessionToken: {
     type: String,
     required: true,
     unique: true,
-    length: 64, // Token seguro generado aleatoriamente
+    length: SESSION_CONSTANTS.TOKEN_LENGTH,
     index: true,
   },
 
-  // CRÍTICO: Tokens seguros almacenados SOLO en servidor (NUNCA enviados al cliente)
+  // Tokens seguros (NUNCA enviados al cliente)
   accessTokenHash: {
     type: String,
     required: true,
-    select: false, // NUNCA incluir en queries por defecto
-    length: 64, // SHA-256 hash del token de acceso
+    select: false,
+    length: SESSION_CONSTANTS.HASH_LENGTH,
   },
 
   refreshTokenHash: {
     type: String,
     required: true,
-    select: false, // NUNCA incluir en queries por defecto
-    length: 64, // SHA-256 hash del token de refresco
+    select: false,
+    length: SESSION_CONSTANTS.HASH_LENGTH,
   },
 
-  // Device Fingerprinting para seguridad
+  // Device fingerprinting
   deviceFingerprint: {
     type: String,
     required: true,
-    length: 64, // SHA-256 hash
+    length: SESSION_CONSTANTS.HASH_LENGTH,
     index: true,
   },
 
   originalFingerprint: {
     type: String,
     required: true,
-    length: 64, // Fingerprint al crear la sesión
+    length: SESSION_CONSTANTS.HASH_LENGTH,
   },
 
-  fingerprintChanges: [FingerprintChangeSchema],
+  fingerprintChanges: {
+    type: [FingerprintChangeSchema],
+    validate: {
+      validator: function (v) {
+        return v.length <= SESSION_CONSTANTS.MAX_FINGERPRINT_CHANGES;
+      },
+      message: `Máximo ${SESSION_CONSTANTS.MAX_FINGERPRINT_CHANGES} cambios de fingerprint permitidos`,
+    },
+  },
 
   // Estado de sesión
   isActive: {
@@ -441,14 +738,7 @@ const UserSessionSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Timestamps de sesión
-  createdAt: {
-    type: Date,
-    default: Date.now,
-    required: true,
-    index: true,
-  },
-
+  // Timestamps mejorados
   lastAccessedAt: {
     type: Date,
     default: Date.now,
@@ -468,7 +758,6 @@ const UserSessionSchema = new mongoose.Schema({
     required: true,
     validate: {
       validator: function (ip) {
-        // Validar formato IPv4 o IPv6 básico
         const ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
         const ipv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/;
         return (
@@ -487,24 +776,23 @@ const UserSessionSchema = new mongoose.Schema({
     type: String,
     required: true,
     maxlength: 1000,
-    index: true, // Para analytics de navegadores
+    index: true,
   },
 
-  // Información detallada del dispositivo
+  // Información detallada
   deviceInfo: {
     type: DeviceInfoSchema,
     required: true,
   },
 
-  // Información geográfica
   location: {
     type: LocationInfoSchema,
   },
 
-  // OAuth session data (si aplica)
+  // OAuth (si aplica)
   oauthProvider: {
     type: String,
-    enum: ["google", "facebook", "apple", "microsoft", "linkedin"],
+    enum: OAUTH_PROVIDERS,
     index: true,
   },
 
@@ -526,156 +814,84 @@ const UserSessionSchema = new mongoose.Schema({
 
   invalidationReason: {
     type: String,
-    enum: [
-      "user_logout",
-      "token_expired",
-      "security_breach",
-      "admin_action",
-      "device_change",
-      "location_change",
-      "suspicious_activity",
-      "max_sessions_exceeded",
-      "password_changed",
-      "account_locked",
-      "gdpr_request",
-      "compliance_violation",
-    ],
+    enum: INVALIDATION_REASONS,
   },
 
-  suspiciousActivity: [SuspiciousActivitySchema],
+  suspiciousActivity: {
+    type: [SuspiciousActivitySchema],
+    validate: {
+      validator: function (v) {
+        return v.length <= SESSION_CONSTANTS.MAX_SUSPICIOUS_ACTIVITIES;
+      },
+      message: `Máximo ${SESSION_CONSTANTS.MAX_SUSPICIOUS_ACTIVITIES} actividades sospechosas permitidas`,
+    },
+  },
 
-  // Configuración de sesión
+  // Configuración
   rememberMe: {
     type: Boolean,
     default: false,
-  },
-
-  maxInactivityMinutes: {
-    type: Number,
-    default: 30,
-    min: 5,
-    max: 43200, // 30 días máximo
   },
 
   autoLogoutWarningShown: {
     type: Date,
   },
 
-  // NUEVO: Configuración específica por tipo de usuario/rol
   sessionPolicy: {
-    requireTwoFactor: {
-      type: Boolean,
-      default: false,
-    },
-    allowedDeviceTypes: [String],
-    allowedCountries: [String],
-    maxConcurrentSessions: {
-      type: Number,
-      default: 3,
-      min: 1,
-      max: 10,
-    },
-    forceLogoutOnLocationChange: {
-      type: Boolean,
-      default: false,
-    },
+    type: SessionPolicySchema,
+    default: () => ({}),
   },
 
-  // Metadatos de sesión (expandidos)
+  // Metadatos expandidos
   metadata: {
-    totalRequests: {
-      type: Number,
-      default: 0,
-    },
-    lastRequestAt: {
-      type: Date,
-    },
-    creationMethod: {
-      type: String,
-      enum: ["password", "oauth", "sso", "token_refresh", "magic_link"],
-      default: "password",
-    },
-    sessionDuration: {
-      type: Number, // Duración en minutos
-    },
-    // NUEVO: Métricas empresariales
-    businessMetrics: {
-      companiesAccessed: [String], // IDs de empresas accedidas
-      featuresUsed: [String], // Funcionalidades utilizadas
-      apiCallsCount: {
-        type: Number,
-        default: 0,
-      },
-      avgResponseTime: {
-        type: Number,
-        default: 0,
-      },
-    },
-    // NUEVO: Información de compliance
-    compliance: {
-      dataProcessingAgreed: {
-        type: Boolean,
-        default: false,
-      },
-      gdprApplicable: {
-        type: Boolean,
-        default: false,
-      },
-      auditTrailEnabled: {
-        type: Boolean,
-        default: true,
-      },
-    },
+    type: SessionMetadataSchema,
+    default: () => ({}),
   },
 
-  // Campos base de auditoría
+  // Aplicar campos base de auditoría
   ...BaseSchemaFields,
 });
 
-// Configurar esquema con funcionalidades base
-setupBaseSchema(UserSessionSchema, {
-  addTimestamps: false, // Ya manejamos timestamps manualmente
-});
-
 // ================================
-// ÍNDICES ESPECÍFICOS OPTIMIZADOS
+// ÍNDICES OPTIMIZADOS
 // ================================
 
 // Índices únicos
 UserSessionSchema.index({ sessionToken: 1 }, { unique: true });
 
-// Índices para consultas de seguridad (optimizados)
-UserSessionSchema.index({
-  userId: 1,
-  isActive: 1,
-  isValid: 1,
-  expiresAt: 1,
-});
+// Índices compuestos para consultas frecuentes
+UserSessionSchema.index(
+  {
+    userId: 1,
+    isActive: 1,
+    isValid: 1,
+    expiresAt: 1,
+  },
+  { name: "user_active_sessions_index" }
+);
 
-UserSessionSchema.index({
-  userId: 1,
-  createdAt: -1,
-});
+UserSessionSchema.index(
+  {
+    userId: 1,
+    createdAt: -1,
+  },
+  { name: "user_sessions_timeline_index" }
+);
 
 // TTL automático para sesiones expiradas
 UserSessionSchema.index(
   { expiresAt: 1 },
-  {
-    expireAfterSeconds: 0,
-    name: "session_ttl_index",
-  }
+  { expireAfterSeconds: 0, name: "session_ttl_index" }
 );
 
-// Índices para detección de seguridad (mejorados)
+// Índices de seguridad
 UserSessionSchema.index(
   {
     ipAddress: 1,
     userId: 1,
     createdAt: -1,
   },
-  {
-    name: "security_monitoring_index",
-  }
+  { name: "security_monitoring_index" }
 );
 
 UserSessionSchema.index(
@@ -684,33 +900,25 @@ UserSessionSchema.index(
     userId: 1,
     isActive: 1,
   },
-  {
-    name: "device_tracking_index",
-  }
+  { name: "device_tracking_index" }
 );
 
-// Índice para sesiones comprometidas
 UserSessionSchema.index(
   {
     isCompromised: 1,
     compromisedAt: -1,
   },
-  {
-    sparse: true,
-    name: "compromised_sessions_index",
-  }
+  { sparse: true, name: "compromised_sessions_index" }
 );
 
-// NUEVO: Índices para analytics empresariales
+// Índices para analytics
 UserSessionSchema.index(
   {
     "deviceInfo.deviceType": 1,
     "location.country": 1,
     createdAt: -1,
   },
-  {
-    name: "analytics_device_location_index",
-  }
+  { name: "analytics_device_location_index" }
 );
 
 UserSessionSchema.index(
@@ -718,78 +926,90 @@ UserSessionSchema.index(
     oauthProvider: 1,
     createdAt: -1,
   },
-  {
-    sparse: true,
-    name: "oauth_analytics_index",
-  }
+  { sparse: true, name: "oauth_analytics_index" }
 );
 
-// NUEVO: Índice para compliance y GDPR
+// Índice para compliance GDPR
 UserSessionSchema.index(
   {
     "location.isEuCountry": 1,
-    "metadata.compliance.gdprApplicable": 1,
+    "metadata.compliance.isGdprApplicable": 1,
     createdAt: -1,
   },
-  {
-    name: "gdpr_compliance_index",
-  }
+  { name: "gdpr_compliance_index" }
 );
 
 // ================================
-// MIDDLEWARE OPTIMIZADO
+// MIDDLEWARE MEJORADO
 // ================================
 
 // Pre-save middleware
 UserSessionSchema.pre("save", function (next) {
+  const now = new Date();
+
   if (this.isNew) {
-    // Configurar expiración por defecto si no está establecida
+    // Configurar expiración por defecto
     if (!this.expiresAt) {
       const hoursToAdd = this.rememberMe ? 24 * 30 : 8; // 30 días o 8 horas
-      this.expiresAt = new Date(Date.now() + hoursToAdd * 60 * 60 * 1000);
+      this.expiresAt = new Date(now.getTime() + hoursToAdd * 60 * 60 * 1000);
     }
 
     // Inicializar metadatos
+    if (!this.metadata) this.metadata = {};
     this.metadata.totalRequests = 1;
-    this.metadata.lastRequestAt = new Date();
+    this.metadata.lastRequestAt = now;
 
-    // NUEVO: Configurar compliance automáticamente
+    // Configurar compliance automáticamente
     if (this.location?.isEuCountry) {
-      this.metadata.compliance.gdprApplicable = true;
+      if (!this.metadata.compliance) this.metadata.compliance = {};
+      this.metadata.compliance.isGdprApplicable = true;
     }
   }
 
   // Validar que la sesión no haya expirado
-  if (this.expiresAt < new Date()) {
+  if (this.expiresAt < now) {
     this.isActive = false;
     this.isValid = false;
-    this.invalidationReason = this.invalidationReason || "token_expired";
+    this.invalidationReason = this.invalidationReason || "tokenExpired";
   }
 
   // Calcular duración de sesión
   if (this.lastAccessedAt && this.createdAt) {
+    if (!this.metadata) this.metadata = {};
     this.metadata.sessionDuration = Math.floor(
       (this.lastAccessedAt - this.createdAt) / (1000 * 60)
     );
   }
 
+  // Actualizar métricas de seguridad
+  if (this.metadata && this.metadata.securityMetrics) {
+    this.metadata.securityMetrics.suspiciousActivityCount =
+      this.suspiciousActivity?.length || 0;
+    this.metadata.securityMetrics.fingerprintChangesCount =
+      this.fingerprintChanges?.length || 0;
+  }
+
   next();
 });
 
-// Pre-update middleware para actualizar lastAccessedAt
+// Pre-update middleware
 UserSessionSchema.pre(/^findOneAnd/, function (next) {
+  const now = new Date();
+
   this.set({
-    lastAccessedAt: new Date(),
+    lastAccessedAt: now,
+    updatedAt: now,
     $inc: {
       "metadata.totalRequests": 1,
       "metadata.businessMetrics.apiCallsCount": 1,
     },
   });
+
   next();
 });
 
 // ================================
-// MÉTODOS DE INSTANCIA (compatibles con tu código)
+// MÉTODOS DE INSTANCIA MEJORADOS
 // ================================
 
 /**
@@ -817,12 +1037,12 @@ UserSessionSchema.methods.markAsCompromised = function (reason) {
   this.compromisedAt = new Date();
   this.isActive = false;
   this.isValid = false;
-  this.invalidationReason = reason || "security_breach";
+  this.invalidationReason = reason || "securityBreach";
   return this.save();
 };
 
 /**
- * Registrar actividad sospechosa (compatible con tu código)
+ * Registrar actividad sospechosa
  */
 UserSessionSchema.methods.logSuspiciousActivity = function (
   type,
@@ -830,6 +1050,10 @@ UserSessionSchema.methods.logSuspiciousActivity = function (
   severity = "medium",
   additionalData = null
 ) {
+  if (!this.suspiciousActivity) {
+    this.suspiciousActivity = [];
+  }
+
   const activity = {
     activityType: type,
     description: description,
@@ -838,34 +1062,32 @@ UserSessionSchema.methods.logSuspiciousActivity = function (
     additionalData: additionalData,
     riskScore: this.calculateRiskScore(type, severity),
     automaticAction: this.getAutomaticAction(severity),
+    actionsTaken: [],
   };
 
   this.suspiciousActivity.push(activity);
 
   // Auto-marcar como comprometida si hay actividad crítica
   if (severity === "critical") {
-    this.markAsCompromised("suspicious_activity");
+    this.markAsCompromised("suspiciousActivity");
   }
 
   return this.save();
 };
 
 /**
- * Registrar cambio de fingerprint (mejorado)
+ * Registrar cambio de fingerprint mejorado
  */
 UserSessionSchema.methods.logFingerprintChange = function (
   newFingerprint,
   changedComponents = []
 ) {
   const previousFingerprint = this.deviceFingerprint;
-
-  // Calcular similitud
   const similarityScore = this.calculateFingerprintSimilarity(
     previousFingerprint,
     newFingerprint
   );
 
-  // Determinar tipo de cambio basado en componentes y similitud
   let changeType = "minor";
   let suspicious = false;
   let autoBlock = false;
@@ -890,11 +1112,16 @@ UserSessionSchema.methods.logFingerprintChange = function (
     newFingerprint: newFingerprint,
     previousFingerprint: previousFingerprint,
     changeType: changeType,
-    suspiciousChange: suspicious,
+    isSuspiciousChange: suspicious,
     changedComponents: changedComponents,
     similarityScore: similarityScore,
-    autoBlocked: autoBlock,
+    isAutoBlocked: autoBlock,
+    blockedReason: autoBlock ? "Critical fingerprint change detected" : null,
   };
+
+  if (!this.fingerprintChanges) {
+    this.fingerprintChanges = [];
+  }
 
   this.fingerprintChanges.push(fingerprintChange);
   this.deviceFingerprint = newFingerprint;
@@ -902,7 +1129,7 @@ UserSessionSchema.methods.logFingerprintChange = function (
   // Registrar actividad sospechosa si el cambio es significativo
   if (suspicious) {
     this.logSuspiciousActivity(
-      "fingerprint_mismatch",
+      "fingerprintMismatch",
       `Cambio ${changeType} en device fingerprint: ${changedComponents.map((c) => c.component).join(", ")}`,
       changeType === "critical" ? "critical" : "high",
       { changedComponents, similarityScore }
@@ -925,19 +1152,20 @@ UserSessionSchema.methods.extendSession = function (additionalHours = 2) {
 };
 
 /**
- * NUEVO: Calcular score de riesgo
+ * Calcular score de riesgo
  */
 UserSessionSchema.methods.calculateRiskScore = function (
   activityType,
   severity
 ) {
   const baseScores = {
-    device_change: 30,
-    location_change: 20,
-    fingerprint_mismatch: 40,
-    rapid_requests: 25,
-    bot_detected: 60,
-    brute_force: 80,
+    deviceChange: 30,
+    locationChange: 20,
+    fingerprintMismatch: 40,
+    rapidRequests: 25,
+    botDetected: 60,
+    bruteForce: 80,
+    privilegeEscalation: 90,
   };
 
   const severityMultipliers = {
@@ -950,11 +1178,11 @@ UserSessionSchema.methods.calculateRiskScore = function (
   const baseScore = baseScores[activityType] || 10;
   const multiplier = severityMultipliers[severity] || 1;
 
-  return Math.min(baseScore * multiplier, 100);
+  return Math.min(baseScore * multiplier, SESSION_CONSTANTS.RISK_SCORE_MAX);
 };
 
 /**
- * NUEVO: Determinar acción automática
+ * Determinar acción automática
  */
 UserSessionSchema.methods.getAutomaticAction = function (severity) {
   switch (severity) {
@@ -970,13 +1198,13 @@ UserSessionSchema.methods.getAutomaticAction = function (severity) {
 };
 
 /**
- * NUEVO: Calcular similitud de fingerprints
+ * Calcular similitud de fingerprints
  */
 UserSessionSchema.methods.calculateFingerprintSimilarity = function (fp1, fp2) {
   if (!fp1 || !fp2) return 0;
   if (fp1 === fp2) return 1;
 
-  // Implementación simplificada - en producción usar algoritmo más robusto
+  // Implementación simplificada - usar algoritmo más robusto en producción
   const maxLen = Math.max(fp1.length, fp2.length);
   let matches = 0;
 
@@ -989,29 +1217,73 @@ UserSessionSchema.methods.calculateFingerprintSimilarity = function (fp1, fp2) {
   return matches / maxLen;
 };
 
+/**
+ * Verificar si cumple políticas de seguridad
+ */
+UserSessionSchema.methods.validateSecurityPolicy = function () {
+  const policy = this.sessionPolicy;
+  const issues = [];
+
+  // Verificar dispositivo permitido
+  if (policy.allowedDeviceTypes?.length > 0) {
+    if (!policy.allowedDeviceTypes.includes(this.deviceInfo.deviceType)) {
+      issues.push({
+        type: "deviceType",
+        message: "Tipo de dispositivo no permitido",
+        severity: "high",
+      });
+    }
+  }
+
+  // Verificar país permitido
+  if (policy.allowedCountries?.length > 0) {
+    if (!policy.allowedCountries.includes(this.location?.country)) {
+      issues.push({
+        type: "location",
+        message: "Ubicación geográfica no permitida",
+        severity: "high",
+      });
+    }
+  }
+
+  // Verificar inactividad
+  const inactiveMinutes = (new Date() - this.lastAccessedAt) / (1000 * 60);
+  if (inactiveMinutes > policy.maxInactivityMinutes) {
+    issues.push({
+      type: "inactivity",
+      message: "Sesión inactiva por demasiado tiempo",
+      severity: "medium",
+    });
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues: issues,
+  };
+};
+
 // ================================
-// MÉTODOS ESTÁTICOS (compatibles con tu código)
+// MÉTODOS ESTÁTICOS MEJORADOS
 // ================================
 
 /**
  * Obtener sesiones activas para un usuario
  */
 UserSessionSchema.statics.getActiveSessions = function (userId) {
-  return this.find({
+  return this.findActive({
     userId: userId,
-    isActive: true,
     isValid: true,
     expiresAt: { $gt: new Date() },
   }).sort({ lastAccessedAt: -1 });
 };
 
 /**
- * Invalidar todas las sesiones de un usuario excepto la actual
+ * Invalidar todas las sesiones excepto la actual
  */
 UserSessionSchema.statics.invalidateAllExcept = function (
   userId,
   currentSessionId,
-  reason = "admin_action"
+  reason = "adminAction"
 ) {
   return this.updateMany(
     {
@@ -1025,32 +1297,48 @@ UserSessionSchema.statics.invalidateAllExcept = function (
         isValid: false,
         invalidationReason: reason,
         updatedAt: new Date(),
+        updatedBy: userId,
       },
+      $inc: { version: 1 },
     }
   );
 };
 
 /**
- * Limpiar sesiones expiradas
+ * Limpiar sesiones expiradas automáticamente
  */
 UserSessionSchema.statics.cleanupExpiredSessions = function () {
-  return this.deleteMany({
-    $or: [
-      { expiresAt: { $lt: new Date() } },
-      {
-        isActive: false,
-        updatedAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      },
-    ],
-  });
+  const cutoffDate = new Date(
+    Date.now() - SESSION_CONSTANTS.SESSION_CLEANUP_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  return this.softDeleteMany(
+    {
+      $or: [
+        { expiresAt: { $lt: new Date() } },
+        {
+          isActive: false,
+          updatedAt: { $lt: cutoffDate },
+        },
+      ],
+    },
+    null, // system delete
+    "Automatic cleanup of expired sessions"
+  );
 };
 
 /**
- * Obtener estadísticas de sesiones (mejorado)
+ * Obtener estadísticas mejoradas de sesiones
  */
-UserSessionSchema.statics.getSessionStats = function (userId) {
+UserSessionSchema.statics.getSessionStats = function (userId, options = {}) {
+  const matchStage = { userId: new mongoose.Types.ObjectId(userId) };
+
+  if (!options.includeDeleted) {
+    matchStage.isDeleted = { $ne: true };
+  }
+
   return this.aggregate([
-    { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+    { $match: matchStage },
     {
       $group: {
         _id: null,
@@ -1077,16 +1365,25 @@ UserSessionSchema.statics.getSessionStats = function (userId) {
         totalApiCalls: { $sum: "$metadata.businessMetrics.apiCallsCount" },
         uniqueDeviceTypes: { $addToSet: "$deviceInfo.deviceType" },
         uniqueCountries: { $addToSet: "$location.country" },
+        avgRiskScore: {
+          $avg: {
+            $avg: "$suspiciousActivity.riskScore",
+          },
+        },
       },
     },
   ]);
 };
 
 /**
- * NUEVO: Obtener analytics empresariales
+ * Obtener analytics empresariales avanzados
  */
 UserSessionSchema.statics.getBusinessAnalytics = function (filters = {}) {
-  const matchStage = { isActive: true, ...filters };
+  const matchStage = {
+    isActive: true,
+    isDeleted: { $ne: true },
+    ...filters,
+  };
 
   return this.aggregate([
     { $match: matchStage },
@@ -1104,6 +1401,7 @@ UserSessionSchema.statics.getBusinessAnalytics = function (filters = {}) {
         oauthProviders: { $push: "$oauthProvider" },
         avgSessionDuration: { $avg: "$metadata.sessionDuration" },
         totalApiCalls: { $sum: "$metadata.businessMetrics.apiCallsCount" },
+        securityIncidents: { $sum: { $size: "$suspiciousActivity" } },
       },
     },
     {
@@ -1122,24 +1420,83 @@ UserSessionSchema.statics.getBusinessAnalytics = function (filters = {}) {
         oauthUsage: 1,
         avgSessionDuration: 1,
         totalApiCalls: 1,
+        securityIncidents: 1,
       },
     },
     { $sort: { date: 1 } },
   ]);
 };
 
+/**
+ * Detectar sesiones sospechosas
+ */
+UserSessionSchema.statics.findSuspiciousSessions = function (criteria = {}) {
+  const suspiciousPatterns = {
+    // Múltiples sesiones desde IPs diferentes
+    multipleIps: {
+      $expr: {
+        $gt: [{ $size: { $setUnion: [["$ipAddress"]] } }, 1],
+      },
+    },
+
+    // Cambios frecuentes de fingerprint
+    frequentFingerprintChanges: {
+      $expr: {
+        $gt: [{ $size: "$fingerprintChanges" }, 3],
+      },
+    },
+
+    // Actividad sospechosa reciente
+    recentSuspiciousActivity: {
+      suspiciousActivity: {
+        $elemMatch: {
+          timestamp: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+          severity: { $in: ["high", "critical"] },
+        },
+      },
+    },
+  };
+
+  const matchConditions = [];
+
+  Object.keys(criteria).forEach((key) => {
+    if (suspiciousPatterns[key] && criteria[key]) {
+      matchConditions.push(suspiciousPatterns[key]);
+    }
+  });
+
+  if (matchConditions.length === 0) {
+    matchConditions.push({ $or: Object.values(suspiciousPatterns) });
+  }
+
+  return this.findActive({
+    $and: [{ $or: matchConditions }, { isCompromised: { $ne: true } }],
+  }).sort({ "metadata.securityMetrics.riskLevel": -1 });
+};
+
 // ================================
-// CONFIGURACIÓN ADICIONAL
+// CONFIGURAR ESQUEMA BASE
 // ================================
 
-// Configurar opciones de transformación para JSON (mejorado)
+// Aplicar configuración base con todas las funcionalidades
+setupBaseSchema(UserSessionSchema, {
+  addTimestamps: false, // Ya manejamos timestamps manualmente
+  addIndexes: true,
+  addVirtuals: true,
+  addMethods: true,
+  addStatics: true,
+  addHelpers: true,
+  addBaseFields: false, // Ya los agregamos manualmente
+});
+
+// Configurar transformación JSON segura
 UserSessionSchema.set("toJSON", {
   virtuals: true,
   transform: function (doc, ret) {
-    // Remover campos sensibles
+    // Remover campos sensibles SIEMPRE
     delete ret.accessTokenHash;
     delete ret.refreshTokenHash;
-    delete ret.sessionToken; // NUNCA enviar el token de sesión
+    delete ret.sessionToken;
     delete ret.__v;
 
     // Limpiar OAuth data sensible
@@ -1148,24 +1505,70 @@ UserSessionSchema.set("toJSON", {
       delete ret.oauthSessionData.refreshTokenHash;
     }
 
-    // Sanitizar actividad sospechosa sensible
+    // Sanitizar actividades sospechosas
     if (ret.suspiciousActivity) {
       ret.suspiciousActivity = ret.suspiciousActivity.map((activity) => ({
         activityType: activity.activityType,
         severity: activity.severity,
         timestamp: activity.timestamp,
-        resolved: activity.resolved,
-        // No incluir descripción detallada ni datos adicionales
+        isResolved: activity.isResolved,
+        riskScore: activity.riskScore,
+        automaticAction: activity.automaticAction,
       }));
     }
+
+    // Remover campos de auditoría sensibles si no es admin
+    delete ret.deletedBy;
+    delete ret.updatedBy;
 
     return ret;
   },
 });
 
 // ================================
-// EXPORTAR MODELO
+// EXPORTAR MODELO Y UTILIDADES
 // ================================
 
 export const UserSession = mongoose.model("UserSession", UserSessionSchema);
+
+export const SessionUtils = {
+  generateSecureToken: () =>
+    crypto.randomBytes(SESSION_CONSTANTS.TOKEN_LENGTH / 2).toString("hex"),
+  hashToken: (token) => crypto.createHash("sha256").update(token).digest("hex"),
+  validateFingerprint: (fingerprint) =>
+    fingerprint && fingerprint.length === SESSION_CONSTANTS.HASH_LENGTH,
+
+  createSessionHash: (userId, deviceInfo, timestamp) => {
+    const data = `${userId}_${deviceInfo.browser}_${deviceInfo.os}_${timestamp}`;
+    return crypto.createHash("sha256").update(data).digest("hex");
+  },
+
+  // Utility para verificar si una IP es privada/local
+  isPrivateIP: (ip) => {
+    const privateRanges = [
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+      /^192\.168\./,
+      /^127\./,
+      /^::1$/,
+      /^fc00:/,
+      /^fe80:/,
+    ];
+    return privateRanges.some((range) => range.test(ip));
+  },
+};
+
+export {
+  SESSION_CONSTANTS,
+  DEVICE_TYPES,
+  OAUTH_PROVIDERS,
+  CREATION_METHODS,
+  INVALIDATION_REASONS,
+  ACTIVITY_TYPES,
+  SEVERITY_LEVELS,
+  AUTOMATIC_ACTIONS,
+  CHANGE_TYPES,
+  COMPONENT_TYPES,
+};
+
 export default UserSession;

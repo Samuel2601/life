@@ -1,37 +1,72 @@
 // =============================================================================
-// src/modules/authentication/models/user.scheme.js
+// src/modules/authentication/models/user.scheme.js - VERSIÓN MEJORADA CON MULTIIDIOMA
+// Integración completa del patrón multiidioma manteniendo camelCase
 // =============================================================================
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import {
   BaseSchemaFields,
   setupBaseSchema,
   CommonValidators,
 } from "../../../modules/core/models/base.scheme.js";
 import {
+  MultiLanguageContentSchema,
+  createMultiLanguageField,
   SUPPORTED_LANGUAGES,
   DEFAULT_LANGUAGE,
 } from "../../../modules/core/models/multi_language_pattern.scheme.js";
 
 /**
- * Schema de perfil de usuario
+ * Schema de perfil de usuario con soporte multiidioma
  */
 const UserProfileSchema = new mongoose.Schema(
   {
-    firstName: {
-      type: String,
-      required: [true, "El nombre es requerido"],
-      trim: true,
-      maxlength: [50, "El nombre no puede exceder 50 caracteres"],
-      minlength: [2, "El nombre debe tener al menos 2 caracteres"],
-    },
-    lastName: {
-      type: String,
-      required: [true, "El apellido es requerido"],
-      trim: true,
-      maxlength: [50, "El apellido no puede exceder 50 caracteres"],
-      minlength: [2, "El apellido debe tener al menos 2 caracteres"],
-    },
+    // Nombres con soporte multiidioma
+    firstName: createMultiLanguageField(true, {
+      validator: {
+        validator: function (v) {
+          return (
+            v &&
+            v.original &&
+            v.original.text &&
+            v.original.text.trim().length >= 2
+          );
+        },
+        message: "El nombre debe tener al menos 2 caracteres",
+      },
+    }),
+
+    lastName: createMultiLanguageField(true, {
+      validator: {
+        validator: function (v) {
+          return (
+            v &&
+            v.original &&
+            v.original.text &&
+            v.original.text.trim().length >= 2
+          );
+        },
+        message: "El apellido debe tener al menos 2 caracteres",
+      },
+    }),
+
+    // Biografía con soporte multiidioma
+    bio: createMultiLanguageField(false, {
+      validator: {
+        validator: function (v) {
+          return (
+            !v ||
+            !v.original ||
+            !v.original.text ||
+            v.original.text.length <= 500
+          );
+        },
+        message: "La biografía no puede exceder 500 caracteres",
+      },
+    }),
+
+    // Campos que NO necesitan traducción (datos específicos del usuario)
     avatar: {
       type: String,
       validate: CommonValidators.url,
@@ -52,15 +87,19 @@ const UserProfileSchema = new mongoose.Schema(
       maxlength: [20, "El teléfono no puede exceder 20 caracteres"],
       validate: CommonValidators.phone,
     },
-    bio: {
-      type: String,
-      maxlength: [500, "La biografía no puede exceder 500 caracteres"],
-      trim: true,
-    },
     website: {
       type: String,
       validate: CommonValidators.url,
     },
+
+    // Título/profesión con soporte multiidioma
+    jobTitle: createMultiLanguageField(false),
+
+    // Ubicación con soporte multiidioma
+    location: createMultiLanguageField(false),
+
+    // Intereses con soporte multiidioma
+    interests: createMultiLanguageField(false),
   },
   { _id: false }
 );
@@ -96,6 +135,9 @@ const OAuthProviderSchema = new mongoose.Schema(
   { _id: false }
 );
 
+/**
+ * Schema mejorado para detalles de registro
+ */
 const RegistrationDetailsSchema = new mongoose.Schema(
   {
     ipAddress: {
@@ -133,10 +175,22 @@ const RegistrationDetailsSchema = new mongoose.Schema(
       maxlength: 200,
       default: null,
     },
+    registrationLanguage: {
+      type: String,
+      enum: SUPPORTED_LANGUAGES,
+      default: DEFAULT_LANGUAGE,
+    },
+    registrationTimezone: {
+      type: String,
+      default: "America/Lima",
+    },
   },
   { _id: false }
 );
 
+/**
+ * Schema para seguimiento de actividad mejorado
+ */
 const ActivityTrackingSchema = new mongoose.Schema(
   {
     firstLogin: {
@@ -175,10 +229,33 @@ const ActivityTrackingSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    totalLanguageSwitches: {
+      type: Number,
+      default: 0,
+    },
+    mostUsedLanguages: [
+      {
+        language: {
+          type: String,
+          enum: SUPPORTED_LANGUAGES,
+        },
+        usageCount: {
+          type: Number,
+          default: 1,
+        },
+        lastUsed: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { _id: false }
 );
 
+/**
+ * Schema para flags de privacidad mejorado
+ */
 const PrivacyFlagsSchema = new mongoose.Schema(
   {
     dataConsentRevoked: {
@@ -193,10 +270,21 @@ const PrivacyFlagsSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    allowTranslationLogging: {
+      type: Boolean,
+      default: false,
+    },
+    shareTranslationData: {
+      type: Boolean,
+      default: false,
+    },
   },
   { _id: false }
 );
 
+/**
+ * Schema para metadatos mejorado con soporte multiidioma
+ */
 const MetadataSchema = new mongoose.Schema(
   {
     registrationSource: {
@@ -222,10 +310,41 @@ const MetadataSchema = new mongoose.Schema(
     registrationDetails: RegistrationDetailsSchema,
     activityTracking: ActivityTrackingSchema,
     privacyFlags: PrivacyFlagsSchema,
+
+    // Métricas de uso multiidioma
+    multiLanguageMetrics: {
+      totalTranslationsRequested: {
+        type: Number,
+        default: 0,
+      },
+      totalTranslationCost: {
+        type: Number,
+        default: 0,
+      },
+      preferredTranslationServices: [
+        {
+          service: {
+            type: String,
+            enum: ["openai", "google", "deepl", "azure", "aws"],
+          },
+          usageCount: {
+            type: Number,
+            default: 0,
+          },
+          avgQuality: {
+            type: Number,
+            default: 0,
+          },
+        },
+      ],
+    },
   },
   { _id: false }
 );
 
+/**
+ * Schema para preferencias de notificaciones
+ */
 const NotificationPreferencesSchema = new mongoose.Schema(
   {
     email: { type: Boolean, default: true },
@@ -235,10 +354,15 @@ const NotificationPreferencesSchema = new mongoose.Schema(
     newBusinessAlert: { type: Boolean, default: true },
     reviewResponses: { type: Boolean, default: true },
     weeklyDigest: { type: Boolean, default: true },
+    translationUpdates: { type: Boolean, default: false },
+    languageContentAvailable: { type: Boolean, default: true },
   },
   { _id: false }
 );
 
+/**
+ * Schema para preferencias de privacidad mejorado
+ */
 const PrivacyPreferencesSchema = new mongoose.Schema(
   {
     profileVisible: { type: Boolean, default: true },
@@ -255,10 +379,17 @@ const PrivacyPreferencesSchema = new mongoose.Schema(
       enum: ["1year", "2years", "5years", "unlimited"],
       default: "2years",
     },
+    // Privacidad específica de traducciones
+    allowTranslationTracking: { type: Boolean, default: false },
+    shareTranslationData: { type: Boolean, default: false },
+    allowLanguageRecommendations: { type: Boolean, default: true },
   },
   { _id: false }
 );
 
+/**
+ * Schema para preferencias de negocio mejorado con multiidioma
+ */
 const BusinessPreferencesSchema = new mongoose.Schema(
   {
     preferredCategories: [
@@ -292,12 +423,38 @@ const BusinessPreferencesSchema = new mongoose.Schema(
       max: 50,
       default: 5, // km
     },
+
+    // Configuración de traducciones automáticas
+    autoTranslationConfig: {
+      enabled: { type: Boolean, default: true },
+      targetLanguages: [
+        {
+          type: String,
+          enum: SUPPORTED_LANGUAGES,
+        },
+      ],
+      translationQuality: {
+        type: String,
+        enum: ["basic", "standard", "premium"],
+        default: "standard",
+      },
+      maxTranslationCost: {
+        type: Number,
+        default: 5,
+        min: 0,
+      },
+      preferredService: {
+        type: String,
+        enum: ["openai", "google", "deepl", "azure", "aws"],
+        default: "openai",
+      },
+    },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de preferencias de usuario
+ * Schema principal de preferencias de usuario mejorado
  */
 const UserPreferencesSchema = new mongoose.Schema(
   {
@@ -305,20 +462,39 @@ const UserPreferencesSchema = new mongoose.Schema(
       type: String,
       enum: SUPPORTED_LANGUAGES,
       default: DEFAULT_LANGUAGE,
+      index: true,
     },
+    fallbackLanguages: [
+      {
+        type: String,
+        enum: SUPPORTED_LANGUAGES,
+      },
+    ],
     timezone: {
       type: String,
       default: "America/Lima",
     },
     notifications: NotificationPreferencesSchema,
     privacy: PrivacyPreferencesSchema,
-    business: BusinessPreferencesSchema, // ✅ AGREGADO: referenciado en repository
+    business: BusinessPreferencesSchema,
+
+    // Configuración específica de multiidioma
+    languagePreferences: {
+      autoDetect: { type: Boolean, default: true },
+      showTranslationOptions: { type: Boolean, default: true },
+      cacheTranslations: { type: Boolean, default: true },
+      translationQuality: {
+        type: String,
+        enum: ["speed", "quality", "cost"],
+        default: "quality",
+      },
+    },
   },
   { _id: false }
 );
 
 /**
- * Schema principal de Usuario
+ * Schema principal de Usuario mejorado con soporte multiidioma completo
  */
 const UserSchema = new mongoose.Schema({
   // Autenticación principal
@@ -337,21 +513,20 @@ const UserSchema = new mongoose.Schema({
     select: false, // No incluir en queries por defecto
     validate: {
       validator: function (v) {
-        // Solo validar si se está estableciendo una contraseña
         return !v || v.length >= 6;
       },
       message: "El hash de contraseña debe tener al menos 6 caracteres",
     },
   },
 
-  // Perfil de usuario
+  // Perfil de usuario con soporte multiidioma
   profile: {
     type: UserProfileSchema,
     required: true,
     default: () => ({}),
   },
 
-  // OAuth providers (sin tokens - solo información de conexión)
+  // OAuth providers
   oauthProviders: {
     google: OAuthProviderSchema,
     facebook: OAuthProviderSchema,
@@ -384,7 +559,7 @@ const UserSchema = new mongoose.Schema({
   emailVerificationToken: {
     type: String,
     select: false,
-    index: { expires: "24h" }, // TTL index para tokens de verificación
+    index: { expires: "24h" },
   },
 
   emailVerificationExpires: {
@@ -396,7 +571,7 @@ const UserSchema = new mongoose.Schema({
   passwordResetToken: {
     type: String,
     select: false,
-    index: { expires: "1h" }, // TTL index para tokens de reset
+    index: { expires: "1h" },
   },
 
   passwordResetExpires: {
@@ -430,18 +605,19 @@ const UserSchema = new mongoose.Schema({
     select: false,
   },
 
-  // Preferencias de usuario
+  // Preferencias de usuario mejoradas
   preferences: {
     type: UserPreferencesSchema,
     default: () => ({}),
   },
 
-  // Metadatos adicionales
+  // Metadatos adicionales mejorados
   metadata: {
     type: MetadataSchema,
     default: () => ({}),
   },
-  // Campos base (auditoría, soft delete, etc.)
+
+  // Campos base heredados
   ...BaseSchemaFields,
 });
 
@@ -451,7 +627,7 @@ setupBaseSchema(UserSchema, {
 });
 
 // ================================
-// ÍNDICES ESPECÍFICOS
+// ÍNDICES ESPECÍFICOS MEJORADOS
 // ================================
 
 // Índices únicos
@@ -472,42 +648,57 @@ UserSchema.index({ emailVerificationToken: 1 }, { sparse: true });
 UserSchema.index({ passwordResetToken: 1 }, { sparse: true });
 UserSchema.index({ lockUntil: 1 }, { sparse: true });
 
-// Índices para búsqueda y filtrado
+// Índices para búsqueda y filtrado multiidioma
 UserSchema.index({ "preferences.language": 1 });
+UserSchema.index({ "preferences.fallbackLanguages": 1 });
 UserSchema.index({ "metadata.lastActiveAt": -1 });
 UserSchema.index({ lastLoginAt: -1 });
 
+// Índices compuestos para multiidioma
 UserSchema.index({
-  "profile.firstName": 1,
-  "profile.lastName": 1,
-  email: 1,
+  "profile.firstName.original.language": 1,
+  "profile.firstName.translationLanguages": 1,
+  "preferences.language": 1,
 });
 
-// Índice de texto para búsqueda
+UserSchema.index({
+  "profile.lastName.original.language": 1,
+  "profile.lastName.translationLanguages": 1,
+  "preferences.language": 1,
+});
+
+// Índice de texto para búsqueda multiidioma
 UserSchema.index(
   {
-    "profile.firstName": "text",
-    "profile.lastName": "text",
+    "profile.firstName.original.text": "text",
+    "profile.lastName.original.text": "text",
+    "profile.bio.original.text": "text",
     email: "text",
   },
   {
-    name: "user_search_index",
+    name: "user_multilang_search_index",
     weights: {
-      "profile.firstName": 10,
-      "profile.lastName": 10,
+      "profile.firstName.original.text": 10,
+      "profile.lastName.original.text": 10,
+      "profile.bio.original.text": 5,
       email: 5,
     },
   }
 );
 
 // ================================
-// VIRTUALS
+// VIRTUALS MEJORADOS CON MULTIIDIOMA
 // ================================
 
-// Virtual para nombre completo
+// Virtual para nombre completo con soporte multiidioma
 UserSchema.virtual("fullName").get(function () {
   if (!this.profile) return "";
-  return `${this.profile.firstName} ${this.profile.lastName}`.trim();
+
+  const language = this.preferences?.language || DEFAULT_LANGUAGE;
+  const firstName = this.getProfileText("firstName", language);
+  const lastName = this.getProfileText("lastName", language);
+
+  return `${firstName} ${lastName}`.trim();
 });
 
 // Virtual para edad
@@ -546,9 +737,124 @@ UserSchema.virtual("hasOAuth").get(function () {
   );
 });
 
+// Virtual para estadísticas de idiomas
+UserSchema.virtual("languageStats").get(function () {
+  if (!this.metadata?.activityTracking?.mostUsedLanguages) {
+    return { primaryLanguage: this.preferences?.language || DEFAULT_LANGUAGE };
+  }
+
+  const stats = this.metadata.activityTracking.mostUsedLanguages.sort(
+    (a, b) => b.usageCount - a.usageCount
+  );
+
+  return {
+    primaryLanguage: this.preferences?.language || DEFAULT_LANGUAGE,
+    mostUsed: stats[0]?.language,
+    totalLanguages: stats.length,
+    languages: stats,
+  };
+});
+
 // ================================
-// MÉTODOS DE INSTANCIA
+// MÉTODOS DE INSTANCIA MEJORADOS CON MULTIIDIOMA
 // ================================
+
+// Método para obtener texto de perfil en idioma específico
+UserSchema.methods.getProfileText = function (
+  field,
+  language = null,
+  options = {}
+) {
+  const targetLanguage =
+    language || this.preferences?.language || DEFAULT_LANGUAGE;
+  const fallbackLanguages = this.preferences?.fallbackLanguages || ["en", "es"];
+
+  if (!this.profile || !this.profile[field]) {
+    return "";
+  }
+
+  const multiLangContent = this.profile[field];
+  if (!multiLangContent.getText) {
+    // Si no es un campo multiidioma, devolver como string
+    return multiLangContent.toString();
+  }
+
+  const result = multiLangContent.getText(
+    targetLanguage,
+    fallbackLanguages,
+    options
+  );
+  return result.text || "";
+};
+
+// Método para obtener perfil completo en idioma específico
+UserSchema.methods.getLocalizedProfile = function (
+  language = null,
+  options = {}
+) {
+  const targetLanguage =
+    language || this.preferences?.language || DEFAULT_LANGUAGE;
+
+  return {
+    firstName: this.getProfileText("firstName", targetLanguage, options),
+    lastName: this.getProfileText("lastName", targetLanguage, options),
+    fullName:
+      this.getProfileText("firstName", targetLanguage, options) +
+      " " +
+      this.getProfileText("lastName", targetLanguage, options),
+    bio: this.getProfileText("bio", targetLanguage, options),
+    jobTitle: this.getProfileText("jobTitle", targetLanguage, options),
+    location: this.getProfileText("location", targetLanguage, options),
+    interests: this.getProfileText("interests", targetLanguage, options),
+    // Campos que no necesitan traducción
+    avatar: this.profile.avatar,
+    dateOfBirth: this.profile.dateOfBirth,
+    phone: this.profile.phone,
+    website: this.profile.website,
+  };
+};
+
+// Método para actualizar texto de perfil multiidioma
+UserSchema.methods.updateProfileText = function (
+  field,
+  text,
+  language = null,
+  options = {}
+) {
+  const targetLanguage =
+    language || this.preferences?.language || DEFAULT_LANGUAGE;
+
+  if (!this.profile[field]) {
+    // Si el campo no existe, crear contenido multiidioma
+    this.profile[field] = {
+      original: {
+        language: targetLanguage,
+        text: text,
+        createdAt: new Date(),
+        lastModified: new Date(),
+      },
+      translations: new Map(),
+      translationLanguages: [],
+      translationConfig: {
+        autoTranslate: options.autoTranslate !== false,
+        targetLanguages: options.targetLanguages || [],
+      },
+    };
+  } else if (this.profile[field].original) {
+    // Si es contenido multiidioma, actualizar
+    if (this.profile[field].original.language === targetLanguage) {
+      // Actualizar texto original
+      this.profile[field].original.text = text;
+      this.profile[field].original.lastModified = new Date();
+    } else {
+      // Agregar como traducción
+      this.profile[field].addTranslation(targetLanguage, text, options);
+    }
+  }
+
+  this.markModified(`profile.${field}`);
+  return this;
+};
 
 // Método para validar contraseña
 UserSchema.methods.validatePassword = async function (password) {
@@ -573,6 +879,40 @@ UserSchema.methods.setPassword = async function (password) {
   return this;
 };
 
+// Método para cambiar idioma principal
+UserSchema.methods.changeLanguage = function (newLanguage) {
+  if (!SUPPORTED_LANGUAGES.includes(newLanguage)) {
+    throw new Error(`Idioma '${newLanguage}' no está soportado`);
+  }
+
+  const oldLanguage = this.preferences.language;
+  this.preferences.language = newLanguage;
+
+  // Actualizar estadísticas de uso de idiomas
+  if (!this.metadata.activityTracking.mostUsedLanguages) {
+    this.metadata.activityTracking.mostUsedLanguages = [];
+  }
+
+  let langStat = this.metadata.activityTracking.mostUsedLanguages.find(
+    (l) => l.language === newLanguage
+  );
+
+  if (!langStat) {
+    langStat = {
+      language: newLanguage,
+      usageCount: 0,
+      lastUsed: new Date(),
+    };
+    this.metadata.activityTracking.mostUsedLanguages.push(langStat);
+  }
+
+  langStat.usageCount++;
+  langStat.lastUsed = new Date();
+  this.metadata.activityTracking.totalLanguageSwitches++;
+
+  return { oldLanguage, newLanguage };
+};
+
 // Método para verificar si está bloqueado
 UserSchema.methods.checkLockStatus = function () {
   return {
@@ -584,7 +924,6 @@ UserSchema.methods.checkLockStatus = function () {
 
 // Método para incrementar intentos de login
 UserSchema.methods.incrementLoginAttempts = async function () {
-  // Si ya está bloqueado y el bloqueo ha expirado, resetear
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
       $unset: { lockUntil: 1 },
@@ -594,7 +933,6 @@ UserSchema.methods.incrementLoginAttempts = async function () {
 
   const updates = { $inc: { loginAttempts: 1 } };
 
-  // Bloquear después de 5 intentos fallidos
   if (this.loginAttempts + 1 >= 5 && !this.isLocked) {
     updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 horas
   }
@@ -648,7 +986,7 @@ UserSchema.methods.disconnectOAuthProvider = function (provider) {
   return this;
 };
 
-// Método para actualizar preferencias
+// Método para actualizar preferencias mejorado
 UserSchema.methods.updatePreferences = function (newPreferences) {
   if (!this.preferences) {
     this.preferences = {};
@@ -666,17 +1004,32 @@ UserSchema.methods.updatePreferences = function (newPreferences) {
       ...this.preferences.privacy,
       ...newPreferences.privacy,
     },
+    business: {
+      ...this.preferences.business,
+      ...newPreferences.business,
+      autoTranslationConfig: {
+        ...this.preferences.business?.autoTranslationConfig,
+        ...newPreferences.business?.autoTranslationConfig,
+      },
+    },
+    languagePreferences: {
+      ...this.preferences.languagePreferences,
+      ...newPreferences.languagePreferences,
+    },
   };
 
+  this.metadata.activityTracking.lastPreferencesUpdate = new Date();
   return this;
 };
 
 // Método para generar token de verificación de email
 UserSchema.methods.generateEmailVerificationToken = function () {
-  const crypto = require("crypto");
   const token = crypto.randomBytes(32).toString("hex");
 
-  this.emailVerificationToken = token;
+  this.emailVerificationToken = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
   this.emailVerificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
 
   return token;
@@ -684,37 +1037,19 @@ UserSchema.methods.generateEmailVerificationToken = function () {
 
 // Método para generar token de reset de contraseña
 UserSchema.methods.generatePasswordResetToken = function () {
-  const crypto = require("crypto");
   const token = crypto.randomBytes(32).toString("hex");
 
-  this.passwordResetToken = token;
+  this.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
   this.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hora
 
   return token;
 };
 
-UserSchema.methods.createPasswordResetToken = function () {
-  const resetToken = crypto.randomBytes(32).toString("hex");
-  this.passwordResetToken = crypto
-    .createHash("sha256")
-    .update(resetToken)
-    .digest("hex");
-  this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  return resetToken;
-};
-
-UserSchema.methods.createEmailVerificationToken = function () {
-  const verificationToken = crypto.randomBytes(32).toString("hex");
-  this.emailVerificationToken = crypto
-    .createHash("sha256")
-    .update(verificationToken)
-    .digest("hex");
-  this.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-  return verificationToken;
-};
-
 // ================================
-// MÉTODOS ESTÁTICOS
+// MÉTODOS ESTÁTICOS MEJORADOS CON MULTIIDIOMA
 // ================================
 
 // Buscar usuario por email
@@ -724,21 +1059,25 @@ UserSchema.statics.findByEmail = function (email) {
 
 // Buscar usuario por token de verificación
 UserSchema.statics.findByVerificationToken = function (token) {
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
   return this.findOne({
-    emailVerificationToken: token,
+    emailVerificationToken: hashedToken,
     emailVerificationExpires: { $gt: Date.now() },
   });
 };
 
 // Buscar usuario por token de reset de contraseña
 UserSchema.statics.findByPasswordResetToken = function (token) {
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
   return this.findOne({
-    passwordResetToken: token,
+    passwordResetToken: hashedToken,
     passwordResetExpires: { $gt: Date.now() },
   });
 };
 
-// Buscar usuarios activos con paginación
+// Buscar usuarios activos con soporte multiidioma
 UserSchema.statics.findActiveUsers = function (options = {}) {
   const {
     page = 1,
@@ -747,6 +1086,7 @@ UserSchema.statics.findActiveUsers = function (options = {}) {
     sortOrder = -1,
     search = "",
     language = null,
+    preferredLanguage = null,
   } = options;
 
   let query = this.find({
@@ -754,17 +1094,34 @@ UserSchema.statics.findActiveUsers = function (options = {}) {
     $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
   });
 
-  // Búsqueda por texto
+  // Búsqueda por texto multiidioma
   if (search) {
     query = query.find({
-      $text: { $search: search },
+      $or: [
+        { $text: { $search: search } },
+        {
+          "profile.firstName.original.text": { $regex: search, $options: "i" },
+        },
+        { "profile.lastName.original.text": { $regex: search, $options: "i" } },
+        { "profile.bio.original.text": { $regex: search, $options: "i" } },
+      ],
     });
   }
 
-  // Filtro por idioma
+  // Filtro por idioma de contenido
   if (language) {
     query = query.find({
-      "preferences.language": language,
+      $or: [
+        { "profile.firstName.original.language": language },
+        { "profile.firstName.translationLanguages": language },
+      ],
+    });
+  }
+
+  // Filtro por idioma preferido del usuario
+  if (preferredLanguage) {
+    query = query.find({
+      "preferences.language": preferredLanguage,
     });
   }
 
@@ -780,7 +1137,7 @@ UserSchema.statics.findActiveUsers = function (options = {}) {
     .lean();
 };
 
-// Estadísticas de usuarios
+// Estadísticas de usuarios mejoradas con multiidioma
 UserSchema.statics.getUserStats = async function () {
   const stats = await this.aggregate([
     {
@@ -818,6 +1175,22 @@ UserSchema.statics.getUserStats = async function () {
             ],
           },
         },
+        multiLanguageUsers: {
+          $sum: {
+            $cond: [
+              {
+                $gt: [
+                  {
+                    $size: { $ifNull: ["$preferences.fallbackLanguages", []] },
+                  },
+                  0,
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
       },
     },
     {
@@ -828,12 +1201,16 @@ UserSchema.statics.getUserStats = async function () {
         verifiedUsers: 1,
         deletedUsers: 1,
         usersWithOAuth: 1,
+        multiLanguageUsers: 1,
         inactiveUsers: { $subtract: ["$totalUsers", "$activeUsers"] },
         verificationRate: {
           $multiply: [{ $divide: ["$verifiedUsers", "$totalUsers"] }, 100],
         },
         oauthAdoptionRate: {
           $multiply: [{ $divide: ["$usersWithOAuth", "$totalUsers"] }, 100],
+        },
+        multiLanguageAdoptionRate: {
+          $multiply: [{ $divide: ["$multiLanguageUsers", "$totalUsers"] }, 100],
         },
       },
     },
@@ -847,13 +1224,15 @@ UserSchema.statics.getUserStats = async function () {
       deletedUsers: 0,
       inactiveUsers: 0,
       usersWithOAuth: 0,
+      multiLanguageUsers: 0,
       verificationRate: 0,
       oauthAdoptionRate: 0,
+      multiLanguageAdoptionRate: 0,
     }
   );
 };
 
-// Usuarios por idioma
+// Usuarios por idioma mejorado
 UserSchema.statics.getUsersByLanguage = async function () {
   return await this.aggregate([
     {
@@ -869,17 +1248,59 @@ UserSchema.statics.getUsersByLanguage = async function () {
         users: {
           $push: {
             id: "$_id",
-            fullName: {
-              $concat: ["$profile.firstName", " ", "$profile.lastName"],
-            },
             email: "$email",
             lastLoginAt: "$lastLoginAt",
+            fallbackLanguages: "$preferences.fallbackLanguages",
+            totalLanguageSwitches:
+              "$metadata.activityTracking.totalLanguageSwitches",
           },
         },
       },
     },
     {
       $sort: { count: -1 },
+    },
+  ]);
+};
+
+// Estadísticas de uso de multiidioma
+UserSchema.statics.getMultiLanguageStats = async function () {
+  return await this.aggregate([
+    {
+      $match: {
+        isActive: true,
+        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+      },
+    },
+    {
+      $project: {
+        primaryLanguage: "$preferences.language",
+        fallbackLanguages: "$preferences.fallbackLanguages",
+        autoTranslate: "$preferences.business.autoTranslationConfig.enabled",
+        totalTranslations:
+          "$metadata.multiLanguageMetrics.totalTranslationsRequested",
+        totalCost: "$metadata.multiLanguageMetrics.totalTranslationCost",
+        languageSwitches: "$metadata.activityTracking.totalLanguageSwitches",
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        languageDistribution: {
+          $push: {
+            language: "$primaryLanguage",
+            fallbacks: "$fallbackLanguages",
+          },
+        },
+        totalTranslations: { $sum: "$totalTranslations" },
+        totalTranslationCost: { $sum: "$totalCost" },
+        avgLanguageSwitches: { $avg: "$languageSwitches" },
+        autoTranslateEnabled: {
+          $sum: {
+            $cond: [{ $eq: ["$autoTranslate", true] }, 1, 0],
+          },
+        },
+      },
     },
   ]);
 };
@@ -913,10 +1334,10 @@ UserSchema.statics.cleanExpiredTokens = async function () {
 };
 
 // ================================
-// MIDDLEWARES
+// MIDDLEWARES MEJORADOS
 // ================================
 
-// Pre-save middleware para validaciones adicionales
+// Pre-save middleware para validaciones adicionales y multiidioma
 UserSchema.pre("save", function (next) {
   // Normalizar email
   if (this.email) {
@@ -933,6 +1354,49 @@ UserSchema.pre("save", function (next) {
   // Actualizar metadata de actividad
   if (this.isModified("lastLoginAt")) {
     this.metadata.lastActiveAt = this.lastLoginAt;
+  }
+
+  // Inicializar campos multiidioma si es necesario
+  if (this.isNew && this.profile) {
+    const userLanguage = this.preferences?.language || DEFAULT_LANGUAGE;
+
+    // Inicializar firstName si no está configurado como multiidioma
+    if (this.profile.firstName && typeof this.profile.firstName === "string") {
+      const originalFirstName = this.profile.firstName;
+      this.profile.firstName = {
+        original: {
+          language: userLanguage,
+          text: originalFirstName,
+          createdAt: new Date(),
+          lastModified: new Date(),
+        },
+        translations: new Map(),
+        translationLanguages: [],
+        translationConfig: {
+          autoTranslate: true,
+          targetLanguages: [],
+        },
+      };
+    }
+
+    // Inicializar lastName si no está configurado como multiidioma
+    if (this.profile.lastName && typeof this.profile.lastName === "string") {
+      const originalLastName = this.profile.lastName;
+      this.profile.lastName = {
+        original: {
+          language: userLanguage,
+          text: originalLastName,
+          createdAt: new Date(),
+          lastModified: new Date(),
+        },
+        translations: new Map(),
+        translationLanguages: [],
+        translationConfig: {
+          autoTranslate: true,
+          targetLanguages: [],
+        },
+      };
+    }
   }
 
   // Limpiar tokens expirados automáticamente
@@ -957,6 +1421,9 @@ UserSchema.post("save", function (doc, next) {
   // Log de creación de usuario (sin datos sensibles)
   if (doc.isNew) {
     console.log(`✅ Usuario creado: ${doc.email} (ID: ${doc._id})`);
+    console.log(
+      `🌐 Idioma principal: ${doc.preferences?.language || DEFAULT_LANGUAGE}`
+    );
   }
   next();
 });
@@ -976,6 +1443,29 @@ UserSchema.set("toJSON", {
     delete ret.twoFactorSecret;
     delete ret.__v;
 
+    // Transformar campos multiidioma para respuesta simple
+    if (ret.profile) {
+      const userLanguage = doc.preferences?.language || DEFAULT_LANGUAGE;
+
+      // Simplificar firstName si es multiidioma
+      if (ret.profile.firstName && ret.profile.firstName.original) {
+        ret.profile.firstName = doc.getProfileText("firstName", userLanguage);
+      }
+
+      // Simplificar lastName si es multiidioma
+      if (ret.profile.lastName && ret.profile.lastName.original) {
+        ret.profile.lastName = doc.getProfileText("lastName", userLanguage);
+      }
+
+      // Simplificar bio si es multiidioma
+      if (ret.profile.bio && ret.profile.bio.original) {
+        ret.profile.bio = doc.getProfileText("bio", userLanguage);
+      }
+
+      // Agregar fullName localizado
+      ret.profile.fullName = doc.fullName;
+    }
+
     // Limpiar OAuth providers (solo mostrar si están conectados)
     if (ret.oauthProviders) {
       Object.keys(ret.oauthProviders).forEach((provider) => {
@@ -983,7 +1473,6 @@ UserSchema.set("toJSON", {
           ret.oauthProviders[provider] &&
           ret.oauthProviders[provider].providerId
         ) {
-          // Solo mantener información no sensible
           ret.oauthProviders[provider] = {
             isConnected: true,
             email: ret.oauthProviders[provider].email,
@@ -994,6 +1483,9 @@ UserSchema.set("toJSON", {
         }
       });
     }
+
+    // Agregar estadísticas de idioma
+    ret.languageStats = doc.languageStats;
 
     return ret;
   },
