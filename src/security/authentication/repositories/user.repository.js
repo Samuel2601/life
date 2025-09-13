@@ -1,1129 +1,83 @@
 // =============================================================================
-// src/modules/authentication/repositories/user.repository.js - VERSIÓN COMPLETA UNIFICADA
-// Utiliza al 100% las funcionalidades del User Schema + BaseRepository mejorado
+// src/modules/authentication/repositories/user.repository.js
+// Repositorio específico para User con soporte multiidioma y funciones especializadas
 // =============================================================================
 import { Types } from "mongoose";
-import bcrypt from "bcrypt";
-import crypto from "crypto";
-import { User } from "../models/user/index.js";
-import { TransactionHelper } from "../../../utils/transsaccion.helper.js";
-import { BaseRepository } from "../../../modules/core/repositories/base.repository.js";
+import { BaseRepository } from "../../core/repositories/base.repository.js";
+import { User } from "../models/user.scheme.js";
+import {
+  SUPPORTED_LANGUAGES,
+  DEFAULT_LANGUAGE,
+} from "../../core/models/multi_language_pattern.scheme.js";
 
 export class UserRepository extends BaseRepository {
   constructor() {
     super(User);
   }
 
-  // ===== MÉTODOS PRINCIPALES DE GESTIÓN DE USUARIOS =====
+  // =============================================================================
+  // 🔐 MÉTODOS DE AUTENTICACIÓN Y SEGURIDAD
+  // =============================================================================
 
   /**
-   * Crear usuario con configuración empresarial completa
-   * @param {Object} userData - Datos del usuario
-   * @param {Object} sessionData - Datos de la sesión de creación
-   * @param {Object} options - Opciones adicionales
+   * Buscar usuario por email para autenticación
    */
-  async createUser(userData, sessionData, options = {}) {
-    return await TransactionHelper.executeWithOptionalTransaction(
-      async (session) => {
-        try {
-          const { password, ...userDataWithoutPassword } = userData;
-
-          // Verificar email único
-          const existingUser = await this.model
-            .findOne({
-              email: userData.email.toLowerCase(),
-            })
-            .session(session);
-
-          if (existingUser) {
-            throw new Error("El email ya está registrado");
-          }
-
-          // Preparar datos completos del usuario
-          const newUserData = {
-            ...userDataWithoutPassword,
-            email: userData.email.toLowerCase(),
-
-            // Perfil completo
-            profile: {
-              firstName: userData.profile?.firstName || userData.firstName,
-              lastName: userData.profile?.lastName || userData.lastName,
-              avatar: userData.profile?.avatar || null,
-              dateOfBirth: userData.profile?.dateOfBirth || null,
-              phone: userData.profile?.phone || null,
-              bio: userData.profile?.bio || null,
-              website: userData.profile?.website || null,
-            },
-            isActive: true,
-            // Metadatos empresariales completos
-            metadata: {
-              registrationSource: userData.registrationSource || "web",
-              lastActiveAt: new Date(),
-              totalLogins: 0,
-              averageSessionDuration: 0,
-
-              // Detalles de registro
-              registrationDetails: {
-                ipAddress: sessionData.ipAddress || "unknown",
-                userAgent: sessionData.userAgent || "unknown",
-                referrer: userData.referrer || null,
-                utmSource: userData.utmSource || null,
-                utmMedium: userData.utmMedium || null,
-                utmCampaign: userData.utmCampaign || null,
-                companyContext: userData.companyContext || null,
-              },
-
-              // Configuración de actividad
-              activityTracking: {
-                firstLogin: null,
-                lastPasswordChange: new Date(),
-                profileCompleteness:
-                  this.calculateProfileCompleteness(userData),
-                accountVerificationLevel:
-                  this.calculateVerificationLevel(userData),
-                lastProfileUpdate: new Date(),
-                lastPreferencesUpdate: new Date(),
-                lastSecurityUpdate: new Date(),
-                lastPrivacyUpdate: new Date(),
-              },
-
-              privacyFlags: {
-                dataConsentRevoked:
-                  userData.privacyFlags?.dataConsentRevoked || false,
-                dataConsentRevokedAt:
-                  userData.privacyFlags?.dataConsentRevokedAt || null,
-                requiresDataDeletion:
-                  userData.privacyFlags?.requiresDataDeletion || false,
-              },
-            },
-
-            // Preferencias empresariales completas
-            preferences: {
-              language: userData.preferredLanguage || "es",
-              timezone: userData.timezone || "America/Lima",
-
-              // Notificaciones empresariales
-              notifications: {
-                email: userData.notifications?.email !== false,
-                push: userData.notifications?.push !== false,
-                sms: userData.notifications?.sms || false,
-                marketing: userData.notifications?.marketing || false,
-                newBusinessAlert:
-                  userData.notifications?.newBusinessAlert !== false,
-                reviewResponses:
-                  userData.notifications?.reviewResponses !== false,
-                weeklyDigest: userData.notifications?.weeklyDigest !== false,
-              },
-
-              // Privacidad avanzada
-              privacy: {
-                profileVisible: userData.privacy?.profileVisible !== false,
-                allowDataCollection:
-                  userData.privacy?.allowDataCollection !== false,
-                allowLocationTracking:
-                  userData.privacy?.allowLocationTracking || false,
-                showInSearch: userData.privacy?.showInSearch !== false,
-                allowBusinessContact:
-                  userData.privacy?.allowBusinessContact !== false,
-                shareAnalytics: userData.privacy?.shareAnalytics !== false,
-                allowPersonalization:
-                  userData.privacy?.allowPersonalization !== false,
-                shareWithPartners: userData.privacy?.shareWithPartners || false,
-                allowCookies: userData.privacy?.allowCookies !== false,
-                dataRetentionPeriod:
-                  userData.privacy?.dataRetentionPeriod || "2years",
-              },
-
-              // Preferencias empresariales
-              business: {
-                preferredCategories:
-                  userData.businessPreferences?.categories || [],
-                searchRadius: userData.businessPreferences?.searchRadius || 10,
-                defaultSortBy:
-                  userData.businessPreferences?.sortBy || "distance",
-                showPrices: userData.businessPreferences?.showPrices !== false,
-                autoTranslate:
-                  userData.businessPreferences?.autoTranslate !== false,
-                preferredLanguages: userData.businessPreferences
-                  ?.preferredLanguages || [userData.preferredLanguage || "es"],
-                notificationRadius:
-                  userData.businessPreferences?.notificationRadius || 5,
-              },
-            },
-
-            // Configuración de seguridad inicial
-            twoFactorEnabled: false,
-            twoFactorSecret: null,
-
-            // Roles iniciales
-            roles: userData.roles || [],
-            isEmailVerified: userData.isEmailVerified || false,
-
-            //Campos de seguridad
-            loginAttempts: 0,
-            lockUntil: null,
-            passwordResetToken: null,
-            passwordResetExpires: null,
-            emailVerificationToken: null,
-            emailVerificationExpires: null,
-          };
-
-          const user = await this.create(newUserData, sessionData, { session });
-
-          // Establecer contraseña si se proporciona
-          if (password) {
-            await this.setPassword(user._id, password, sessionData, {
-              session,
-            });
-          }
-
-          // Generar token de verificación de email
-          if (!userData.isEmailVerified) {
-            await this.generateEmailVerificationToken(user._id, { session });
-          }
-
-          console.log(`✅ Usuario creado: ${user.email} (ID: ${user._id})`);
-          return user;
-        } catch (error) {
-          console.error("Error creando usuario:", error);
-          throw error;
-        }
-      }
-    );
-  }
-
-  /**
-   * Actualizar usuario con validaciones completas
-   * @param {string} userId - ID del usuario
-   * @param {Object} updateData - Datos a actualizar
-   * @param {Object} userData - Datos del usuario que actualiza
-   */
-  async updateUser(userId, updateData, userData) {
+  async findByEmailForAuth(email) {
     try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      // Validar email único si se cambia
-      if (updateData.email && updateData.email !== user.email) {
-        const existingUser = await this.model.findOne({
-          email: updateData.email.toLowerCase(),
-          _id: { $ne: userId },
-        });
-
-        if (existingUser) {
-          throw new Error("El email ya está en uso");
-        }
-
-        updateData.email = updateData.email.toLowerCase();
-        updateData.isEmailVerified = false; // Requerir verificación del nuevo email
-      }
-
-      return await this.update(userId, updateData, userData);
-    } catch (error) {
-      console.error("Error actualizando usuario:", error);
-      throw error;
-    }
-  }
-
-  // ===== GESTIÓN DE 2FA COMPLETA =====
-
-  /**
-   * Habilitar autenticación de dos factores
-   * @param {string} userId - ID del usuario
-   * @param {Object} userData - Datos del usuario que habilita
-   */
-  async enableTwoFactor(userId, userData) {
-    try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      if (user.twoFactorEnabled) {
-        throw new Error("2FA ya está habilitado para este usuario");
-      }
-
-      // Generar secreto para 2FA (TOTP)
-      const secret = this.generateTwoFactorSecret();
-
-      const updateData = {
-        twoFactorEnabled: true,
-        twoFactorSecret: secret,
-        "metadata.activityTracking.lastSecurityUpdate": new Date(),
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user,
-            twoFactorEnabled: true,
-          }),
-      };
-
-      await this.update(userId, updateData, userData);
-
-      // Retornar información para QR code (sin el secreto por seguridad)
-      return {
-        backupCodes: this.generateBackupCodes(),
-        qrCodeUrl: this.generateQRCodeUrl(user.email, secret),
-        secretKey: secret, // Solo para mostrar una vez
-      };
-    } catch (error) {
-      console.error("Error habilitando 2FA:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Deshabilitar autenticación de dos factores
-   * @param {string} userId - ID del usuario
-   * @param {string} verificationCode - Código de verificación
-   * @param {Object} userData - Datos del usuario que deshabilita
-   */
-  async disableTwoFactor(userId, verificationCode, userData) {
-    try {
-      const user = await this.findById(userId, { includeSecrets: true });
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      if (!user.twoFactorEnabled) {
-        throw new Error("2FA no está habilitado para este usuario");
-      }
-
-      // Verificar código antes de deshabilitar
-      const isValidCode = this.verifyTwoFactorCode(
-        user.twoFactorSecret,
-        verificationCode
-      );
-      if (!isValidCode) {
-        throw new Error("Código de verificación inválido");
-      }
-
-      const updateData = {
-        twoFactorEnabled: false,
-        twoFactorSecret: null,
-        "metadata.activityTracking.lastSecurityUpdate": new Date(),
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user,
-            twoFactorEnabled: false,
-          }),
-      };
-
-      return await this.update(userId, updateData, userData);
-    } catch (error) {
-      console.error("Error deshabilitando 2FA:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Verificar código 2FA
-   * @param {string} secret - Secreto 2FA
-   * @param {string} code - Código a verificar
-   */
-  verifyTwoFactorCode(secret, code) {
-    try {
-      // TODO: Implementar verificación TOTP real con librería como 'speakeasy'
-      // const verified = speakeasy.totp.verify({
-      //   secret: secret,
-      //   encoding: 'base32',
-      //   token: code,
-      //   window: 1
-      // });
-
-      // Por ahora, código de prueba simple
-      return code && code.length === 6 && /^\d+$/.test(code);
-    } catch (error) {
-      console.error("Error verificando código 2FA:", error);
-      return false;
-    }
-  }
-
-  // ===== GESTIÓN DE PERFILES AVANZADA =====
-
-  /**
-   * Actualizar perfil completo con validaciones
-   * @param {string} userId - ID del usuario
-   * @param {Object} profileData - Datos del perfil
-   * @param {Object} userData - Datos del usuario que actualiza
-   */
-  async updateCompleteProfile(userId, profileData, userData) {
-    try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      // Validar y limpiar datos del perfil
-      const validatedProfile = this.validateProfileData(profileData);
-
-      // Calcular nueva completitud del perfil
-      const newProfileCompleteness = this.calculateProfileCompleteness({
-        profile: {
-          ...user.profile,
-          ...validatedProfile,
-        },
-      });
-
-      const updateData = {
-        profile: {
-          ...user.profile,
-          ...validatedProfile,
-        },
-        "metadata.activityTracking.profileCompleteness": newProfileCompleteness,
-        "metadata.activityTracking.lastProfileUpdate": new Date(),
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user,
-            profile: { ...user.profile, ...validatedProfile },
-          }),
-      };
-
-      const updatedUser = await this.update(userId, updateData, userData);
-
-      // Emitir evento si el perfil se completó
-      if (
-        newProfileCompleteness >= 0.8 &&
-        user.metadata?.activityTracking?.profileCompleteness < 0.8
-      ) {
-        console.log(`🎉 Perfil completado para usuario ${userId}`);
-        // TODO: Emitir evento 'profile_completed'
-      }
-
-      return updatedUser;
-    } catch (error) {
-      console.error("Error actualizando perfil completo:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Actualizar preferencias empresariales
-   * @param {string} userId - ID del usuario
-   * @param {Object} businessPrefs - Preferencias empresariales
-   * @param {Object} userData - Datos del usuario que actualiza
-   */
-  async updateBusinessPreferences(userId, businessPrefs, userData) {
-    try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      const validatedPrefs = {
-        preferredCategories: businessPrefs.preferredCategories || [],
-        searchRadius: Math.min(
-          Math.max(businessPrefs.searchRadius || 10, 1),
-          100
-        ),
-        defaultSortBy: ["distance", "rating", "name", "newest"].includes(
-          businessPrefs.defaultSortBy
-        )
-          ? businessPrefs.defaultSortBy
-          : "distance",
-        showPrices: Boolean(businessPrefs.showPrices),
-        autoTranslate: Boolean(businessPrefs.autoTranslate),
-        preferredLanguages: businessPrefs.preferredLanguages || [
-          user.preferences.language,
-        ],
-        notificationRadius: Math.min(
-          Math.max(businessPrefs.notificationRadius || 5, 1),
-          50
-        ),
-      };
-
-      const updateData = {
-        "preferences.business": validatedPrefs,
-        "metadata.activityTracking.lastPreferencesUpdate": new Date(),
-      };
-
-      return await this.update(userId, updateData, userData);
-    } catch (error) {
-      console.error("Error actualizando preferencias empresariales:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Actualizar configuraciones de privacidad avanzadas
-   * @param {string} userId - ID del usuario
-   * @param {Object} privacySettings - Configuraciones de privacidad
-   * @param {Object} userData - Datos del usuario que actualiza
-   */
-  async updateAdvancedPrivacySettings(userId, privacySettings, userData) {
-    try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      const validatedPrivacy = {
-        profileVisible: Boolean(privacySettings.profileVisible),
-        allowDataCollection: Boolean(privacySettings.allowDataCollection),
-        allowLocationTracking: Boolean(privacySettings.allowLocationTracking),
-        showInSearch: Boolean(privacySettings.showInSearch),
-        allowBusinessContact: Boolean(privacySettings.allowBusinessContact),
-        shareAnalytics: Boolean(privacySettings.shareAnalytics),
-        allowPersonalization: Boolean(privacySettings.allowPersonalization),
-        shareWithPartners: Boolean(privacySettings.shareWithPartners),
-        allowCookies: Boolean(privacySettings.allowCookies),
-        dataRetentionPeriod: privacySettings.dataRetentionPeriod || "2years",
-      };
-
-      const updateData = {
-        "preferences.privacy": validatedPrivacy,
-        "metadata.activityTracking.lastPrivacyUpdate": new Date(),
-      };
-
-      // Si se revoca el consentimiento de datos, marcar para revisión
-      if (
-        !validatedPrivacy.allowDataCollection &&
-        user.preferences?.privacy?.allowDataCollection
-      ) {
-        updateData["metadata.privacyFlags"] = {
-          dataConsentRevoked: true,
-          dataConsentRevokedAt: new Date(),
-          requiresDataDeletion: true,
-        };
-      }
-
-      return await this.update(userId, updateData, userData);
-    } catch (error) {
-      console.error("Error actualizando configuraciones de privacidad:", error);
-      throw error;
-    }
-  }
-
-  // ===== ANÁLISIS DE ACTIVIDAD Y MÉTRICAS =====
-
-  /**
-   * Análisis completo de actividad de usuario
-   * @param {string} userId - ID del usuario
-   * @param {Object} options - Opciones de análisis
-   */
-  async getUserActivityAnalysis(userId, options = {}) {
-    try {
-      const { dateFrom, dateTo, includeDetailedMetrics = false } = options;
-
-      const pipeline = [
-        { $match: { _id: new Types.ObjectId(userId) } },
-
-        // Lookup con sesiones de usuario
-        {
-          $lookup: {
-            from: "usersessions",
-            localField: "_id",
-            foreignField: "userId",
-            pipeline: [
-              ...(dateFrom || dateTo
-                ? [
-                    {
-                      $match: {
-                        createdAt: {
-                          ...(dateFrom && { $gte: new Date(dateFrom) }),
-                          ...(dateTo && { $lte: new Date(dateTo) }),
-                        },
-                      },
-                    },
-                  ]
-                : []),
-              {
-                $group: {
-                  _id: null,
-                  totalSessions: { $sum: 1 },
-                  activeSessions: {
-                    $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
-                  },
-                  avgSessionDuration: { $avg: "$metadata.sessionDuration" },
-                  totalRequests: { $sum: "$metadata.totalRequests" },
-                  uniqueDevices: { $addToSet: "$deviceFingerprint" },
-                  uniqueLocations: { $addToSet: "$location.city" },
-                  suspiciousActivities: {
-                    $sum: { $size: { $ifNull: ["$suspiciousActivity", []] } },
-                  },
-
-                  // Métricas empresariales
-                  businessMetrics: {
-                    searchesPerformed: {
-                      $sum: "$metadata.businessMetrics.searchesPerformed",
-                    },
-                    businessesViewed: {
-                      $sum: {
-                        $size: {
-                          $ifNull: [
-                            "$metadata.businessMetrics.businessesViewed",
-                            [],
-                          ],
-                        },
-                      },
-                    },
-                    reviewsSubmitted: {
-                      $sum: "$metadata.businessMetrics.reviewsSubmitted",
-                    },
-                    translationsRequested: {
-                      $sum: "$metadata.businessMetrics.translationsRequested",
-                    },
-                    companiesAccessed: {
-                      $addToSet: "$metadata.businessMetrics.companiesAccessed",
-                    },
-                  },
-                },
-              },
-            ],
-            as: "sessionAnalysis",
-          },
-        },
-
-        // Lookup con reseñas del usuario
-        {
-          $lookup: {
-            from: "reviews",
-            localField: "_id",
-            foreignField: "userId",
-            pipeline: [
-              ...(dateFrom || dateTo
-                ? [
-                    {
-                      $match: {
-                        createdAt: {
-                          ...(dateFrom && { $gte: new Date(dateFrom) }),
-                          ...(dateTo && { $lte: new Date(dateTo) }),
-                        },
-                      },
-                    },
-                  ]
-                : []),
-              {
-                $group: {
-                  _id: null,
-                  totalReviews: { $sum: 1 },
-                  avgRating: { $avg: "$rating" },
-                  helpfulVotes: { $sum: "$helpfulVotes" },
-                  businessesReviewed: { $addToSet: "$businessId" },
-                },
-              },
-            ],
-            as: "reviewAnalysis",
-          },
-        },
-
-        // Lookup con favoritos del usuario
-        {
-          $lookup: {
-            from: "favorites",
-            localField: "_id",
-            foreignField: "userId",
-            pipeline: [
-              {
-                $group: {
-                  _id: null,
-                  totalFavorites: { $sum: 1 },
-                  favoriteCategories: { $addToSet: "$businessCategory" },
-                },
-              },
-            ],
-            as: "favoriteAnalysis",
-          },
-        },
-
-        // Proyección final
-        {
-          $project: {
-            userId: "$_id",
-            profile: 1,
-            preferences: 1,
-            metadata: 1,
-            isActive: 1,
-            isEmailVerified: 1,
-            twoFactorEnabled: 1,
-            roles: 1,
-            createdAt: 1,
-            lastLoginAt: 1,
-
-            // Análisis de actividad
-            activitySummary: {
-              profileCompleteness:
-                "$metadata.activityTracking.profileCompleteness",
-              verificationLevel:
-                "$metadata.activityTracking.accountVerificationLevel",
-              totalLogins: "$metadata.totalLogins",
-              averageSessionDuration: "$metadata.averageSessionDuration",
-              lastActiveAt: "$metadata.lastActiveAt",
-
-              // Datos de sesiones
-              sessionMetrics: { $arrayElemAt: ["$sessionAnalysis", 0] },
-
-              // Datos de reseñas
-              reviewMetrics: { $arrayElemAt: ["$reviewAnalysis", 0] },
-
-              // Datos de favoritos
-              favoriteMetrics: { $arrayElemAt: ["$favoriteAnalysis", 0] },
-
-              // Métricas calculadas
-              engagementScore: {
-                $divide: [
-                  {
-                    $add: [
-                      {
-                        $multiply: [
-                          {
-                            $ifNull: [
-                              {
-                                $arrayElemAt: [
-                                  "$sessionAnalysis.totalSessions",
-                                  0,
-                                ],
-                              },
-                              0,
-                            ],
-                          },
-                          1,
-                        ],
-                      },
-                      {
-                        $multiply: [
-                          {
-                            $ifNull: [
-                              {
-                                $arrayElemAt: [
-                                  "$reviewAnalysis.totalReviews",
-                                  0,
-                                ],
-                              },
-                              0,
-                            ],
-                          },
-                          3,
-                        ],
-                      },
-                      { $multiply: ["$metadata.totalLogins", 0.5] },
-                    ],
-                  },
-                  {
-                    $max: [
-                      {
-                        $divide: [
-                          { $subtract: [new Date(), "$createdAt"] },
-                          1000 * 60 * 60 * 24,
-                        ],
-                      },
-                      1,
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        },
-      ];
-
-      const result = await this.model.aggregate(pipeline);
-
-      if (!result || result.length === 0) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      const analysis = result[0];
-
-      // Calcular métricas adicionales si se solicita
-      if (includeDetailedMetrics) {
-        analysis.detailedMetrics = await this.calculateDetailedUserMetrics(
-          userId,
-          options
-        );
-      }
-
-      return analysis;
-    } catch (error) {
-      console.error("Error obteniendo análisis de actividad:", error);
-      throw error;
-    }
-  }
-
-  // ===== BÚSQUEDAS AVANZADAS =====
-
-  /**
-   * Búsqueda avanzada de usuarios con agregación
-   * @param {Object} filters - Filtros de búsqueda
-   * @param {Object} options - Opciones de paginación
-   */
-  async findUsersWithAdvancedFilters(filters = {}, options = {}) {
-    try {
-      const {
-        search,
-        language,
-        hasCompletedProfile,
-        has2FA,
-        businessPreferences,
-        activityLevel,
-        registrationSource,
-        verificationLevel,
-        hasOAuth,
-        dateRange,
-      } = filters;
-
-      const searchConfig = {
-        filters: {
-          // Filtros básicos de texto
-          ...(search && {
-            $or: [
-              { "profile.firstName": { $regex: search, $options: "i" } },
-              { "profile.lastName": { $regex: search, $options: "i" } },
-              { email: { $regex: search, $options: "i" } },
-            ],
-          }),
-
-          // Filtros específicos
-          ...(language && { "preferences.language": language }),
-          ...(has2FA !== undefined && { twoFactorEnabled: has2FA }),
-          ...(registrationSource && {
-            "metadata.registrationSource": registrationSource,
-          }),
-          ...(hasOAuth !== undefined && this.buildOAuthFilter(hasOAuth)),
-
-          // Filtro por completitud de perfil
-          ...(hasCompletedProfile !== undefined && {
-            "metadata.activityTracking.profileCompleteness": hasCompletedProfile
-              ? { $gte: 0.8 }
-              : { $lt: 0.8 },
-          }),
-
-          // Filtro por nivel de verificación
-          ...(verificationLevel && {
-            "metadata.activityTracking.accountVerificationLevel": {
-              $gte: verificationLevel,
-            },
-          }),
-
-          // Filtro por rango de fechas
-          ...(dateRange && {
-            createdAt: {
-              $gte: new Date(dateRange.from),
-              $lte: new Date(dateRange.to),
-            },
-          }),
-        },
-
-        options,
-
-        lookups: [
-          // Lookup con roles
-          {
-            from: "roles",
-            localField: "roles",
-            foreignField: "_id",
-            as: "userRoles",
-            pipeline: [
-              { $project: { roleName: 1, displayName: 1, hierarchy: 1 } },
-            ],
-          },
-
-          // Lookup con estadísticas de sesiones
-          {
-            from: "usersessions",
-            let: { userId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$userId", "$$userId"] } } },
-              {
-                $group: {
-                  _id: null,
-                  totalSessions: { $sum: 1 },
-                  activeSessions: {
-                    $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
-                  },
-                  lastSessionAt: { $max: "$lastAccessedAt" },
-                  totalBusinessMetrics: {
-                    searchesPerformed: {
-                      $sum: "$metadata.businessMetrics.searchesPerformed",
-                    },
-                    businessesViewed: {
-                      $sum: {
-                        $size: {
-                          $ifNull: [
-                            "$metadata.businessMetrics.businessesViewed",
-                            [],
-                          ],
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            ],
-            as: "sessionStats",
-          },
-
-          // Lookup con reseñas
-          {
-            from: "reviews",
-            let: { userId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$userId", "$$userId"] } } },
-              {
-                $group: {
-                  _id: null,
-                  totalReviews: { $sum: 1 },
-                  avgRating: { $avg: "$rating" },
-                },
-              },
-            ],
-            as: "reviewStats",
-          },
-        ],
-
-        customPipeline: [
-          // Agregar estadísticas calculadas
-          {
-            $addFields: {
-              sessionSummary: { $arrayElemAt: ["$sessionStats", 0] },
-              reviewSummary: { $arrayElemAt: ["$reviewStats", 0] },
-              roleHierarchy: { $max: "$userRoles.hierarchy" },
-              hasOAuthConnection: {
-                $or: [
-                  { $ne: ["$oauthProviders.google.providerId", null] },
-                  { $ne: ["$oauthProviders.facebook.providerId", null] },
-                  { $ne: ["$oauthProviders.apple.providerId", null] },
-                  { $ne: ["$oauthProviders.microsoft.providerId", null] },
-                ],
-              },
-            },
-          },
-
-          // Filtrar por nivel de actividad
-          ...(activityLevel
-            ? [
-                {
-                  $match: {
-                    "sessionSummary.totalSessions":
-                      activityLevel === "high"
-                        ? { $gte: 10 }
-                        : activityLevel === "medium"
-                          ? { $gte: 3, $lt: 10 }
-                          : { $lt: 3 },
-                  },
-                },
-              ]
-            : []),
-
-          // Filtrar por preferencias empresariales
-          ...(businessPreferences?.length
-            ? [
-                {
-                  $match: {
-                    "preferences.business.preferredCategories": {
-                      $in: businessPreferences,
-                    },
-                  },
-                },
-              ]
-            : []),
-        ],
-      };
-
-      return await this.searchWithAggregation(searchConfig);
-    } catch (error) {
-      console.error("Error en búsqueda avanzada de usuarios:", error);
-      throw error;
-    }
-  }
-
-  // ===== AUTENTICACIÓN Y CREDENCIALES =====
-
-  /**
-   * Buscar usuario por email
-   * @param {string} email - Email del usuario
-   * @param {Object} options - Opciones de búsqueda
-   */
-  async findByEmail(email, options = {}) {
-    try {
-      const { includePassword = false, session } = options;
-
-      let query = this.model.findOne({
-        email: email.toLowerCase(),
-        $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-      });
-
-      if (session) {
-        query = query.session(session);
-      }
-
-      if (!includePassword) {
-        query = query.select("-passwordHash");
-      }
-
-      return await query.lean();
+      const user = await this.model
+        .findOne({
+          email: email.toLowerCase().trim(),
+          $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+          isActive: true,
+        })
+        .select("+passwordHash +emailVerificationToken +passwordResetToken")
+        .populate("roles", "roleName displayName permissions")
+        .lean();
+
+      return user;
     } catch (error) {
       console.error("Error buscando usuario por email:", error);
-      throw error;
+      throw new Error(`Error en autenticación: ${error.message}`);
     }
   }
 
   /**
-   * Validar credenciales de usuario
-   * @param {string} email - Email del usuario
-   * @param {string} password - Contraseña a validar
+   * Validar credenciales de login
    */
   async validateCredentials(email, password) {
     try {
-      const user = await this.findByEmail(email, { includePassword: true });
+      const user = await this.findByEmailForAuth(email);
 
-      if (!user || !user.passwordHash) {
-        return null;
+      if (!user) {
+        throw new Error("Usuario no encontrado");
       }
 
-      if (!user.isActive || !user.profile?.isActive) {
-        throw new Error("Cuenta desactivada");
-      }
-
+      // Verificar si está bloqueado
       if (user.lockUntil && user.lockUntil > new Date()) {
-        throw new Error("Cuenta bloqueada temporalmente");
+        throw new Error(
+          "Cuenta temporalmente bloqueada por múltiples intentos fallidos"
+        );
       }
 
-      const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+      // Crear instancia para usar método validatePassword
+      const userInstance = this.model.hydrate(user);
+      const isValidPassword = await userInstance.validatePassword(password);
 
       if (!isValidPassword) {
-        await this.incrementLoginAttempts(user._id);
-        return null;
-      }
-
-      await this.resetLoginAttempts(user._id);
-
-      const { passwordHash, ...userWithoutPassword } = user;
-      return userWithoutPassword;
-    } catch (error) {
-      console.error("Error validando credenciales:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Establecer contraseña de usuario
-   * @param {string} userId - ID del usuario
-   * @param {string} password - Nueva contraseña
-   * @param {Object} sessionData - Datos de sesión
-   * @param {Object} options - Opciones adicionales
-   */
-  async setPassword(userId, password, sessionData, options = {}) {
-    try {
-      if (!password || password.length < 8) {
-        throw new Error("La contraseña debe tener al menos 8 caracteres");
-      }
-
-      const saltRounds = 12;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-
-      const updateData = {
-        passwordHash,
-        "metadata.activityTracking.lastPasswordChange": new Date(),
-      };
-
-      const updatedUser = await this.update(
-        userId,
-        updateData,
-        sessionData,
-        options
-      );
-
-      return updatedUser;
-    } catch (error) {
-      console.error("Error estableciendo contraseña:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Actualizar intentos de login
-   * @param {string} userId - ID del usuario
-   * @param {boolean} success - Si el login fue exitoso
-   */
-  async updateLoginAttempts(userId, success) {
-    try {
-      if (success) {
-        return await this.model.findByIdAndUpdate(
-          userId,
-          {
-            $unset: { loginAttempts: 1, lockUntil: 1 },
-            $set: {
-              lastLoginAt: new Date(),
-              updatedAt: new Date(),
-              "metadata.lastActiveAt": new Date(),
-              "metadata.activityTracking.firstLogin": {
-                $cond: {
-                  if: { $eq: ["$metadata.activityTracking.firstLogin", null] },
-                  then: new Date(),
-                  else: "$metadata.activityTracking.firstLogin",
-                },
-              },
-            },
-            $inc: { "metadata.totalLogins": 1 },
-          },
-          { new: true }
-        );
-      } else {
-        const user = await this.model.findById(userId);
-        if (!user) return null;
-
-        const attempts = (user.loginAttempts || 0) + 1;
-        const updates = {
-          loginAttempts: attempts,
-          updatedAt: new Date(),
-        };
-
-        if (attempts >= 5) {
-          updates.lockUntil = new Date(Date.now() + 2 * 60 * 60 * 1000);
-        }
-
-        return await this.model.findByIdAndUpdate(userId, updates, {
-          new: true,
+        // Incrementar intentos fallidos
+        await this.model.findByIdAndUpdate(user._id, {
+          $inc: { loginAttempts: 1 },
+          $set:
+            user.loginAttempts >= 4
+              ? { lockUntil: new Date(Date.now() + 2 * 60 * 60 * 1000) }
+              : {},
         });
-      }
-    } catch (error) {
-      console.error("Error actualizando intentos de login:", error);
-      throw error;
-    }
-  }
 
-  /**
-   * Incrementar intentos de login fallidos
-   * @param {string} userId - ID del usuario
-   */
-  async incrementLoginAttempts(userId) {
-    try {
-      const user = await this.model.findById(userId);
-      if (!user) return;
-
-      if (user.lockUntil && user.lockUntil < Date.now()) {
-        await this.model.updateOne(
-          { _id: userId },
-          {
-            $unset: { lockUntil: 1 },
-            $set: { loginAttempts: 1 },
-          }
-        );
-        return;
+        throw new Error("Contraseña incorrecta");
       }
 
-      const updates = { $inc: { loginAttempts: 1 } };
-
-      if (user.loginAttempts + 1 >= 5 && !user.lockUntil) {
-        updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 };
-      }
-
-      await this.model.updateOne({ _id: userId }, updates);
-    } catch (error) {
-      console.error("Error incrementando intentos de login:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Resetear intentos de login fallidos
-   * @param {string} userId - ID del usuario
-   */
-  async resetLoginAttempts(userId) {
-    try {
-      const updates = {
+      // Reset intentos de login exitoso
+      await this.model.findByIdAndUpdate(user._id, {
         $unset: { lockUntil: 1 },
         $set: {
           loginAttempts: 0,
@@ -1131,118 +85,121 @@ export class UserRepository extends BaseRepository {
           "metadata.lastActiveAt": new Date(),
         },
         $inc: { "metadata.totalLogins": 1 },
-      };
-
-      await this.model.updateOne({ _id: userId }, updates);
-    } catch (error) {
-      console.error("Error reseteando intentos de login:", error);
-      throw error;
-    }
-  }
-
-  // ===== OAUTH Y PROVEEDORES EXTERNOS =====
-
-  /**
-   * Conectar proveedor OAuth
-   * @param {string} userId - ID del usuario
-   * @param {string} provider - Proveedor OAuth
-   * @param {Object} providerData - Datos del proveedor
-   * @param {Object} sessionData - Datos de sesión
-   */
-  async connectOAuthProvider(userId, provider, providerData, sessionData) {
-    try {
-      const allowedProviders = ["google", "facebook", "apple", "microsoft"];
-
-      if (!allowedProviders.includes(provider)) {
-        throw new Error(`Proveedor OAuth '${provider}' no válido`);
-      }
-
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      if (user.oauthProviders?.[provider]?.providerId) {
-        throw new Error(`Proveedor ${provider} ya está conectado`);
-      }
-
-      const updateData = {
-        [`oauthProviders.${provider}`]: {
-          providerId: providerData.providerId,
-          email: providerData.email,
-          isVerified: providerData.isVerified || false,
-          connectedAt: new Date(),
-          lastUsed: new Date(),
-        },
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user,
-            oauthProviders: {
-              ...user.oauthProviders,
-              [provider]: providerData,
-            },
-          }),
-      };
-
-      return await this.update(userId, updateData, sessionData);
-    } catch (error) {
-      console.error("Error conectando proveedor OAuth:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Desconectar proveedor OAuth
-   * @param {string} userId - ID del usuario
-   * @param {string} provider - Proveedor OAuth
-   * @param {Object} sessionData - Datos de sesión
-   */
-  async disconnectOAuthProvider(userId, provider, sessionData) {
-    try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
-      }
-
-      const updateData = {
-        [`oauthProviders.${provider}`]: undefined,
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user,
-            oauthProviders: { ...user.oauthProviders, [provider]: null },
-          }),
-      };
-
-      return await this.update(userId, updateData, sessionData, {
-        $unset: { [`oauthProviders.${provider}`]: 1 },
       });
+
+      return user;
     } catch (error) {
-      console.error("Error desconectando proveedor OAuth:", error);
+      console.error("Error validando credenciales:", error);
       throw error;
     }
   }
 
-  // ===== VERIFICACIÓN DE EMAIL =====
+  /**
+   * Crear usuario con configuración inicial multiidioma
+   */
+  async createUser(userData, options = {}) {
+    try {
+      const {
+        language = DEFAULT_LANGUAGE,
+        autoSetupMultiLanguage = true,
+        targetLanguages = [],
+      } = options;
+
+      // Preparar datos del perfil multiidioma
+      const profileData = { ...userData.profile };
+
+      if (autoSetupMultiLanguage && profileData.firstName) {
+        profileData.firstName = {
+          original: {
+            language: language,
+            text: profileData.firstName,
+            createdAt: new Date(),
+            lastModified: new Date(),
+          },
+          translations: new Map(),
+          translationLanguages: [],
+          translationConfig: {
+            autoTranslate: targetLanguages.length > 0,
+            targetLanguages: targetLanguages,
+          },
+        };
+      }
+
+      if (autoSetupMultiLanguage && profileData.lastName) {
+        profileData.lastName = {
+          original: {
+            language: language,
+            text: profileData.lastName,
+            createdAt: new Date(),
+            lastModified: new Date(),
+          },
+          translations: new Map(),
+          translationLanguages: [],
+          translationConfig: {
+            autoTranslate: targetLanguages.length > 0,
+            targetLanguages: targetLanguages,
+          },
+        };
+      }
+
+      // Configurar preferencias de idioma
+      const preferences = {
+        language: language,
+        fallbackLanguages:
+          targetLanguages.length > 0 ? targetLanguages : ["en", "es"],
+        ...userData.preferences,
+        business: {
+          autoTranslationConfig: {
+            enabled: true,
+            targetLanguages: targetLanguages,
+            translationQuality: "standard",
+          },
+          ...userData.preferences?.business,
+        },
+      };
+
+      const newUserData = {
+        ...userData,
+        profile: profileData,
+        preferences: preferences,
+        metadata: {
+          registrationDetails: {
+            registrationLanguage: language,
+            ...userData.metadata?.registrationDetails,
+          },
+          activityTracking: {
+            mostUsedLanguages: [
+              {
+                language: language,
+                usageCount: 1,
+                lastUsed: new Date(),
+              },
+            ],
+          },
+          ...userData.metadata,
+        },
+      };
+
+      const user = await this.create(newUserData, { userId: "system" });
+      return user;
+    } catch (error) {
+      console.error("Error creando usuario:", error);
+      throw new Error(`Error creando usuario: ${error.message}`);
+    }
+  }
 
   /**
-   * Generar token de verificación de email
-   * @param {string} userId - ID del usuario
-   * @param {Object} options - Opciones adicionales
+   * Gestión de tokens de verificación
    */
-  async generateEmailVerificationToken(userId, options = {}) {
+  async generateEmailVerificationToken(userId) {
     try {
-      const token = crypto.randomBytes(32).toString("hex");
-      const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const user = await this.findById(userId);
+      if (!user) throw new Error("Usuario no encontrado");
 
-      await this.model.updateOne(
-        { _id: userId },
-        {
-          emailVerificationToken: token,
-          emailVerificationExpires: expires,
-        },
-        options
-      );
+      const userInstance = this.model.hydrate(user);
+      const token = userInstance.generateEmailVerificationToken();
 
+      await userInstance.save();
       return token;
     } catch (error) {
       console.error("Error generando token de verificación:", error);
@@ -1250,651 +207,976 @@ export class UserRepository extends BaseRepository {
     }
   }
 
-  /**
-   * Verificar email con token
-   * @param {string} token - Token de verificación
-   * @param {Object} sessionData - Datos de sesión
-   */
-  async verifyEmailWithToken(token, sessionData) {
+  async verifyEmail(token) {
     try {
-      const user = await this.model.findOne({
-        emailVerificationToken: token,
-        emailVerificationExpires: { $gt: new Date() },
-      });
-
+      const user = await this.model.findByVerificationToken(token);
       if (!user) {
         throw new Error("Token de verificación inválido o expirado");
       }
 
-      const updateData = {
-        isEmailVerified: true,
-        "metadata.activityTracking.accountVerificationLevel":
-          this.calculateVerificationLevel({
-            ...user.toObject(),
-            isEmailVerified: true,
-          }),
+      await this.model.findByIdAndUpdate(user._id, {
+        $set: {
+          isEmailVerified: true,
+          "metadata.activityTracking.accountVerificationLevel": 1,
+        },
         $unset: {
           emailVerificationToken: 1,
           emailVerificationExpires: 1,
         },
-      };
+      });
 
-      return await this.update(user._id, updateData, sessionData);
+      return { message: "Email verificado exitosamente" };
     } catch (error) {
       console.error("Error verificando email:", error);
       throw error;
     }
   }
 
-  // ===== RESET DE CONTRASEÑA =====
-
   /**
-   * Generar token de reset de contraseña
-   * @param {string} email - Email del usuario
+   * Reset de contraseña
    */
   async generatePasswordResetToken(email) {
     try {
-      const user = await this.findByEmail(email);
+      const user = await this.model.findByEmail(email);
       if (!user) {
         throw new Error("Usuario no encontrado");
       }
 
-      const token = crypto.randomBytes(32).toString("hex");
-      const expires = new Date(Date.now() + 60 * 60 * 1000);
+      const token = user.generatePasswordResetToken();
+      await user.save();
 
-      await this.model.updateOne(
-        { _id: user._id },
-        {
-          passwordResetToken: token,
-          passwordResetExpires: expires,
-        }
-      );
-
-      return { token, userId: user._id, email: user.email };
+      return { token, user: { email: user.email, id: user._id } };
     } catch (error) {
       console.error("Error generando token de reset:", error);
       throw error;
     }
   }
 
-  /**
-   * Resetear contraseña con token
-   * @param {string} token - Token de reset
-   * @param {string} newPassword - Nueva contraseña
-   * @param {Object} sessionData - Datos de sesión
-   */
-  async resetPasswordWithToken(token, newPassword, sessionData) {
+  async resetPassword(token, newPassword) {
     try {
-      const user = await this.model.findOne({
-        passwordResetToken: token,
-        passwordResetExpires: { $gt: new Date() },
-      });
-
+      const user = await this.model.findByPasswordResetToken(token);
       if (!user) {
         throw new Error("Token de reset inválido o expirado");
       }
 
-      await this.setPassword(user._id, newPassword, sessionData);
+      await user.setPassword(newPassword);
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      user.metadata.activityTracking.lastPasswordChange = new Date();
 
-      await this.model.updateOne(
-        { _id: user._id },
-        {
-          $unset: {
-            passwordResetToken: 1,
-            passwordResetExpires: 1,
-          },
-        }
-      );
-
-      return user;
+      await user.save();
+      return { message: "Contraseña actualizada exitosamente" };
     } catch (error) {
       console.error("Error reseteando contraseña:", error);
       throw error;
     }
   }
 
-  // ===== PREFERENCIAS DE USUARIO =====
+  // =============================================================================
+  // 🌐 MÉTODOS ESPECÍFICOS MULTIIDIOMA
+  // =============================================================================
 
   /**
-   * Actualizar preferencias de usuario (método legacy compatible)
-   * @param {string} userId - ID del usuario
-   * @param {Object} preferences - Nuevas preferencias
-   * @param {Object} sessionData - Datos de sesión
+   * Obtener perfil localizado de usuario
    */
-  async updatePreferences(userId, preferences, sessionData) {
+  async getLocalizedProfile(userId, language = null, options = {}) {
     try {
-      const user = await this.findById(userId);
-      if (!user) {
-        throw new Error("Usuario no encontrado");
+      const user = await this.findById(userId, {
+        populate: "roles",
+        lean: false,
+        returnInstance: true,
+      });
+
+      if (!user) throw new Error("Usuario no encontrado");
+
+      const targetLanguage =
+        language || user.preferences?.language || DEFAULT_LANGUAGE;
+      const localizedProfile = user.getLocalizedProfile(
+        targetLanguage,
+        options
+      );
+
+      return {
+        ...localizedProfile,
+        id: user._id,
+        email: user.email,
+        preferences: user.preferences,
+        languageStats: user.languageStats,
+        isEmailVerified: user.isEmailVerified,
+        roles: user.roles,
+      };
+    } catch (error) {
+      console.error("Error obteniendo perfil localizado:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Actualizar texto de perfil multiidioma
+   */
+  async updateProfileText(
+    userId,
+    field,
+    text,
+    language = null,
+    userData,
+    options = {}
+  ) {
+    try {
+      const user = await this.findById(userId, {
+        lean: false,
+        returnInstance: true,
+      });
+      if (!user) throw new Error("Usuario no encontrado");
+
+      const targetLanguage =
+        language || user.preferences?.language || DEFAULT_LANGUAGE;
+      user.updateProfileText(field, text, targetLanguage, options);
+      user.updatedBy = userData.userId;
+
+      await user.save();
+
+      // Registrar actividad de actualización de idioma
+      if (language && language !== user.preferences?.language) {
+        await this.trackLanguageUsage(userId, language);
       }
 
-      const currentPreferences = user.preferences || {};
-      const updatedPreferences = {
-        ...currentPreferences,
-        ...preferences,
-        notifications: {
-          ...currentPreferences.notifications,
-          ...preferences.notifications,
+      return user.getLocalizedProfile(targetLanguage);
+    } catch (error) {
+      console.error(`Error actualizando ${field}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cambiar idioma principal del usuario
+   */
+  async changeUserLanguage(userId, newLanguage, userData) {
+    try {
+      if (!SUPPORTED_LANGUAGES.includes(newLanguage)) {
+        throw new Error(`Idioma '${newLanguage}' no está soportado`);
+      }
+
+      const user = await this.findById(userId, {
+        lean: false,
+        returnInstance: true,
+      });
+      if (!user) throw new Error("Usuario no encontrado");
+
+      const result = user.changeLanguage(newLanguage);
+      user.updatedBy = userData.userId;
+
+      await user.save();
+
+      return {
+        message: "Idioma cambiado exitosamente",
+        oldLanguage: result.oldLanguage,
+        newLanguage: result.newLanguage,
+        languageStats: user.languageStats,
+      };
+    } catch (error) {
+      console.error("Error cambiando idioma:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Registrar uso de idioma
+   */
+  async trackLanguageUsage(userId, language) {
+    try {
+      await this.model.findByIdAndUpdate(
+        userId,
+        {
+          $inc: { "metadata.activityTracking.totalLanguageSwitches": 1 },
+          $set: {
+            "metadata.activityTracking.mostUsedLanguages.$[elem].usageCount": 1,
+            "metadata.activityTracking.mostUsedLanguages.$[elem].lastUsed":
+              new Date(),
+          },
         },
-        privacy: {
-          ...currentPreferences.privacy,
-          ...preferences.privacy,
+        {
+          arrayFilters: [{ "elem.language": language }],
+          upsert: false,
+        }
+      );
+
+      // Si el idioma no existe, agregarlo
+      await this.model.findByIdAndUpdate(userId, {
+        $addToSet: {
+          "metadata.activityTracking.mostUsedLanguages": {
+            language: language,
+            usageCount: 1,
+            lastUsed: new Date(),
+          },
         },
-        business: {
-          ...currentPreferences.business,
-          ...preferences.business,
+      });
+    } catch (error) {
+      console.error("Error registrando uso de idioma:", error);
+    }
+  }
+
+  // =============================================================================
+  // 🔧 GESTIÓN DE OAUTH
+  // =============================================================================
+
+  /**
+   * Conectar proveedor OAuth
+   */
+  async connectOAuthProvider(userId, provider, providerData, userData) {
+    try {
+      const user = await this.findById(userId, {
+        lean: false,
+        returnInstance: true,
+      });
+      if (!user) throw new Error("Usuario no encontrado");
+
+      user.connectOAuthProvider(provider, providerData);
+      user.updatedBy = userData.userId;
+      user.metadata.activityTracking.lastSecurityUpdate = new Date();
+
+      await user.save();
+
+      return {
+        message: `Proveedor ${provider} conectado exitosamente`,
+        connectedProviders: Object.keys(user.oauthProviders || {}).filter(
+          (key) => user.oauthProviders[key]?.providerId
+        ),
+      };
+    } catch (error) {
+      console.error(`Error conectando ${provider}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Desconectar proveedor OAuth
+   */
+  async disconnectOAuthProvider(userId, provider, userData) {
+    try {
+      const user = await this.findById(userId, {
+        lean: false,
+        returnInstance: true,
+      });
+      if (!user) throw new Error("Usuario no encontrado");
+
+      // Verificar que no sea la única forma de autenticación
+      if (!user.passwordHash && user.hasOAuth) {
+        const connectedProviders = Object.keys(
+          user.oauthProviders || {}
+        ).filter((key) => user.oauthProviders[key]?.providerId);
+
+        if (
+          connectedProviders.length === 1 &&
+          connectedProviders[0] === provider
+        ) {
+          throw new Error(
+            "No puedes desconectar el único método de autenticación. Configura una contraseña primero."
+          );
+        }
+      }
+
+      user.disconnectOAuthProvider(provider);
+      user.updatedBy = userData.userId;
+      user.metadata.activityTracking.lastSecurityUpdate = new Date();
+
+      await user.save();
+
+      return {
+        message: `Proveedor ${provider} desconectado exitosamente`,
+      };
+    } catch (error) {
+      console.error(`Error desconectando ${provider}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Buscar o crear usuario por OAuth
+   */
+  async findOrCreateByOAuth(
+    provider,
+    providerData,
+    language = DEFAULT_LANGUAGE
+  ) {
+    try {
+      // Buscar usuario existente por email o provider ID
+      let user = await this.model.findOne({
+        $or: [
+          { email: providerData.email },
+          {
+            [`oauthProviders.${provider}.providerId`]: providerData.providerId,
+          },
+        ],
+        $and: [
+          { $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }] },
+          { isActive: true },
+        ],
+      });
+
+      if (user) {
+        // Actualizar información del proveedor
+        const userInstance = this.model.hydrate(user);
+        userInstance.connectOAuthProvider(provider, {
+          ...providerData,
+          lastUsed: new Date(),
+        });
+        await userInstance.save();
+        return userInstance.toObject();
+      }
+
+      // Crear nuevo usuario
+      const names = providerData.name
+        ? providerData.name.split(" ")
+        : ["Usuario", "Oauth"];
+      const userData = {
+        email: providerData.email,
+        profile: {
+          firstName: names[0] || "Usuario",
+          lastName: names.slice(1).join(" ") || "OAuth",
+          avatar: providerData.picture || null,
+        },
+        isEmailVerified: providerData.emailVerified || false,
+        oauthProviders: {
+          [provider]: {
+            providerId: providerData.providerId,
+            email: providerData.email,
+            isVerified: providerData.emailVerified || false,
+            connectedAt: new Date(),
+            lastUsed: new Date(),
+          },
+        },
+        metadata: {
+          registrationSource: "oauth",
+          registrationDetails: {
+            registrationLanguage: language,
+          },
         },
       };
 
-      const updateData = {
-        preferences: updatedPreferences,
-        "metadata.activityTracking.lastPreferencesUpdate": new Date(),
+      return await this.createUser(userData, {
+        language,
+        autoSetupMultiLanguage: true,
+        targetLanguages: ["en", "es"],
+      });
+    } catch (error) {
+      console.error("Error en OAuth:", error);
+      throw error;
+    }
+  }
+
+  // =============================================================================
+  // 👥 BÚSQUEDAS Y CONSULTAS ESPECÍFICAS
+  // =============================================================================
+
+  /**
+   * Búsqueda avanzada de usuarios con filtros multiidioma
+   */
+  async searchUsers(filters = {}, options = {}) {
+    try {
+      const {
+        text = "",
+        language = null,
+        preferredLanguage = null,
+        roles = [],
+        isVerified = null,
+        dateFrom = null,
+        dateTo = null,
+        includeProfile = true,
+        ...otherFilters
+      } = filters;
+
+      const config = {
+        filters: {
+          ...otherFilters,
+          searchText: text,
+          searchFields: [
+            "profile.firstName.original.text",
+            "profile.lastName.original.text",
+            "profile.bio.original.text",
+            "email",
+          ],
+          dateFrom,
+          dateTo,
+        },
+        options: {
+          ...options,
+          enablePagination: true,
+        },
+        autoLookups: includeProfile,
+        customLookups:
+          roles.length > 0
+            ? [
+                {
+                  from: "roles",
+                  localField: "roles",
+                  foreignField: "_id",
+                  as: "rolesData",
+                  pipeline: [
+                    { $match: { roleName: { $in: roles } } },
+                    { $project: { roleName: 1, displayName: 1 } },
+                  ],
+                },
+              ]
+            : [],
       };
 
-      return await this.update(userId, updateData, sessionData);
+      // Filtros específicos
+      if (preferredLanguage) {
+        config.filters["preferences.language"] = preferredLanguage;
+      }
+
+      if (language) {
+        config.filters.$or = [
+          { "profile.firstName.original.language": language },
+          { "profile.firstName.translationLanguages": language },
+        ];
+      }
+
+      if (isVerified !== null) {
+        config.filters.isEmailVerified = isVerified;
+      }
+
+      if (roles.length > 0) {
+        config.filters["rolesData.roleName"] = { $in: roles };
+      }
+
+      return await this.executeAggregationPipeline(config);
+    } catch (error) {
+      console.error("Error en búsqueda de usuarios:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener usuarios por idioma con estadísticas
+   */
+  async getUsersByLanguageStats(options = {}) {
+    try {
+      const { includeInactive = false } = options;
+
+      const config = {
+        pipeline: [
+          ...(includeInactive
+            ? []
+            : [
+                {
+                  $match: {
+                    isActive: true,
+                    $or: [
+                      { isDeleted: false },
+                      { isDeleted: { $exists: false } },
+                    ],
+                  },
+                },
+              ]),
+          {
+            $group: {
+              _id: "$preferences.language",
+              totalUsers: { $sum: 1 },
+              verifiedUsers: {
+                $sum: { $cond: [{ $eq: ["$isEmailVerified", true] }, 1, 0] },
+              },
+              oauthUsers: {
+                $sum: {
+                  $cond: [
+                    {
+                      $or: [
+                        {
+                          $exists: ["$oauthProviders.google.providerId", true],
+                        },
+                        {
+                          $exists: [
+                            "$oauthProviders.facebook.providerId",
+                            true,
+                          ],
+                        },
+                        { $exists: ["$oauthProviders.apple.providerId", true] },
+                        {
+                          $exists: [
+                            "$oauthProviders.microsoft.providerId",
+                            true,
+                          ],
+                        },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              avgLanguageSwitches: {
+                $avg: "$metadata.activityTracking.totalLanguageSwitches",
+              },
+              lastActivity: { $max: "$metadata.lastActiveAt" },
+              users: {
+                $push: {
+                  id: "$_id",
+                  email: "$email",
+                  lastLoginAt: "$lastLoginAt",
+                  totalLogins: "$metadata.totalLogins",
+                },
+              },
+            },
+          },
+          {
+            $project: {
+              language: "$_id",
+              _id: 0,
+              totalUsers: 1,
+              verifiedUsers: 1,
+              oauthUsers: 1,
+              verificationRate: {
+                $multiply: [
+                  { $divide: ["$verifiedUsers", "$totalUsers"] },
+                  100,
+                ],
+              },
+              oauthAdoptionRate: {
+                $multiply: [{ $divide: ["$oauthUsers", "$totalUsers"] }, 100],
+              },
+              avgLanguageSwitches: { $round: ["$avgLanguageSwitches", 2] },
+              lastActivity: 1,
+              sampleUsers: { $slice: ["$users", 5] },
+            },
+          },
+          { $sort: { totalUsers: -1 } },
+        ],
+        options: { enablePagination: false },
+      };
+
+      const result = await this.executeAggregationPipeline(config);
+      return result;
+    } catch (error) {
+      console.error("Error obteniendo estadísticas por idioma:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Dashboard de estadísticas de usuario
+   */
+  async getDashboardStats() {
+    try {
+      const config = {
+        facets: {
+          // Estadísticas generales
+          general: [
+            {
+              $group: {
+                _id: null,
+                totalUsers: { $sum: 1 },
+                activeUsers: {
+                  $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
+                },
+                verifiedUsers: {
+                  $sum: { $cond: [{ $eq: ["$isEmailVerified", true] }, 1, 0] },
+                },
+                oauthUsers: {
+                  $sum: {
+                    $cond: [
+                      {
+                        $gt: [
+                          {
+                            $size: {
+                              $objectToArray: {
+                                $ifNull: ["$oauthProviders", {}],
+                              },
+                            },
+                          },
+                          0,
+                        ],
+                      },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+
+          // Distribución por idiomas
+          languageDistribution: [
+            {
+              $group: {
+                _id: "$preferences.language",
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { count: -1 } },
+            { $limit: 10 },
+          ],
+
+          // Registros por mes
+          registrationTrend: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": -1, "_id.month": -1 } },
+            { $limit: 12 },
+          ],
+
+          // Usuarios más activos multiidioma
+          multiLanguageUsers: [
+            {
+              $match: {
+                "metadata.activityTracking.totalLanguageSwitches": { $gt: 0 },
+              },
+            },
+            {
+              $project: {
+                email: 1,
+                totalSwitches:
+                  "$metadata.activityTracking.totalLanguageSwitches",
+                primaryLanguage: "$preferences.language",
+                mostUsedLanguages:
+                  "$metadata.activityTracking.mostUsedLanguages",
+              },
+            },
+            { $sort: { totalSwitches: -1 } },
+            { $limit: 10 },
+          ],
+        },
+        options: { enablePagination: false },
+      };
+
+      return await this.executeAggregationPipeline(config);
+    } catch (error) {
+      console.error("Error obteniendo estadísticas del dashboard:", error);
+      throw error;
+    }
+  }
+
+  // =============================================================================
+  // ⚙️ GESTIÓN DE PREFERENCIAS
+  // =============================================================================
+
+  /**
+   * Actualizar preferencias de usuario
+   */
+  async updateUserPreferences(userId, preferences, userData) {
+    try {
+      const user = await this.findById(userId, {
+        lean: false,
+        returnInstance: true,
+      });
+      if (!user) throw new Error("Usuario no encontrado");
+
+      const oldLanguage = user.preferences?.language;
+      user.updatePreferences(preferences);
+      user.updatedBy = userData.userId;
+
+      await user.save();
+
+      // Registrar cambio de idioma si aplica
+      if (preferences.language && preferences.language !== oldLanguage) {
+        await this.trackLanguageUsage(userId, preferences.language);
+      }
+
+      return {
+        message: "Preferencias actualizadas exitosamente",
+        preferences: user.preferences,
+        languageChanged:
+          preferences.language && preferences.language !== oldLanguage,
+        languageStats: user.languageStats,
+      };
     } catch (error) {
       console.error("Error actualizando preferencias:", error);
       throw error;
     }
   }
 
-  // ===== BÚSQUEDAS COMPATIBLES =====
+  // =============================================================================
+  // 📊 REPORTES Y ANÁLISIS
+  // =============================================================================
 
   /**
-   * Buscar usuarios con filtros (método legacy compatible)
-   * @param {Object} filters - Filtros de búsqueda
-   * @param {Object} options - Opciones de paginación
+   * Reporte de adopción multiidioma
    */
-  async findWithFilters(filters = {}, options = {}) {
+  async getMultiLanguageAdoptionReport(dateRange = {}) {
     try {
-      const {
-        search,
-        language,
-        isActive,
-        isEmailVerified,
-        registrationSource,
-        hasOAuth,
-        dateFrom,
-        dateTo,
-      } = filters;
-
-      const {
-        page = 1,
-        limit = 10,
-        sortBy = "createdAt",
-        sortOrder = -1,
-        populate = ["roles"],
-      } = options;
-
-      let query = {
+      const { startDate, endDate } = dateRange;
+      const matchStage = {
+        isActive: true,
         $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
       };
 
-      if (search) {
-        query.$and = query.$and || [];
-        query.$and.push({
-          $or: [
-            { "profile.firstName": { $regex: search, $options: "i" } },
-            { "profile.lastName": { $regex: search, $options: "i" } },
-            { email: { $regex: search, $options: "i" } },
-          ],
-        });
+      if (startDate || endDate) {
+        matchStage.createdAt = {};
+        if (startDate) matchStage.createdAt.$gte = new Date(startDate);
+        if (endDate) matchStage.createdAt.$lte = new Date(endDate);
       }
 
-      if (language) query["preferences.language"] = language;
-      if (isActive !== undefined) query.isActive = isActive;
-      if (isEmailVerified !== undefined)
-        query.isEmailVerified = isEmailVerified;
-      if (registrationSource)
-        query["metadata.registrationSource"] = registrationSource;
-
-      if (hasOAuth !== undefined) {
-        if (hasOAuth) {
-          query.$or = [
-            { "oauthProviders.google.providerId": { $exists: true } },
-            { "oauthProviders.facebook.providerId": { $exists: true } },
-            { "oauthProviders.apple.providerId": { $exists: true } },
-            { "oauthProviders.microsoft.providerId": { $exists: true } },
-          ];
-        } else {
-          query.$and = query.$and || [];
-          query.$and.push({
-            "oauthProviders.google.providerId": { $exists: false },
-            "oauthProviders.facebook.providerId": { $exists: false },
-            "oauthProviders.apple.providerId": { $exists: false },
-            "oauthProviders.microsoft.providerId": { $exists: false },
-          });
-        }
-      }
-
-      if (dateFrom || dateTo) {
-        query.createdAt = {};
-        if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
-        if (dateTo) query.createdAt.$lte = new Date(dateTo);
-      }
-
-      return await this.findAll(query, {
-        page,
-        limit,
-        sort: { [sortBy]: sortOrder },
-        populate,
-      });
-    } catch (error) {
-      console.error("Error buscando usuarios con filtros:", error);
-      throw error;
-    }
-  }
-
-  // ===== ESTADÍSTICAS Y ANÁLISIS =====
-
-  /**
-   * Obtener estadísticas de usuarios
-   */
-  async getUserStats() {
-    try {
-      const stats = await this.model.aggregate([
-        {
-          $match: {
-            $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            totalUsers: { $sum: 1 },
-            activeUsers: {
-              $sum: { $cond: [{ $eq: ["$isActive", true] }, 1, 0] },
-            },
-            verifiedUsers: {
-              $sum: { $cond: [{ $eq: ["$isEmailVerified", true] }, 1, 0] },
-            },
-            usersWithOAuth: {
-              $sum: {
-                $cond: [
-                  {
-                    $or: [
-                      { $exists: ["$oauthProviders.google.providerId", true] },
-                      {
-                        $exists: ["$oauthProviders.facebook.providerId", true],
-                      },
-                      { $exists: ["$oauthProviders.apple.providerId", true] },
-                      {
-                        $exists: ["$oauthProviders.microsoft.providerId", true],
-                      },
-                    ],
-                  },
-                  1,
-                  0,
+      const config = {
+        pipeline: [
+          { $match: matchStage },
+          {
+            $project: {
+              primaryLanguage: "$preferences.language",
+              fallbackLanguagesCount: {
+                $size: { $ifNull: ["$preferences.fallbackLanguages", []] },
+              },
+              totalLanguageSwitches:
+                "$metadata.activityTracking.totalLanguageSwitches",
+              hasMultiLanguageProfile: {
+                $or: [
+                  { $exists: ["$profile.firstName.translations", true] },
+                  { $exists: ["$profile.lastName.translations", true] },
+                  { $exists: ["$profile.bio.translations", true] },
                 ],
               },
+              autoTranslateEnabled:
+                "$preferences.business.autoTranslationConfig.enabled",
+              createdAt: 1,
             },
-            usersWithCompletedProfiles: {
-              $sum: {
-                $cond: [
-                  {
-                    $gte: [
-                      "$metadata.activityTracking.profileCompleteness",
-                      0.8,
-                    ],
-                  },
-                  1,
-                  0,
-                ],
+          },
+          {
+            $group: {
+              _id: null,
+              totalUsers: { $sum: 1 },
+              multiLanguageUsers: {
+                $sum: {
+                  $cond: [{ $gt: ["$fallbackLanguagesCount", 0] }, 1, 0],
+                },
               },
-            },
-            usersWithTwoFactor: {
-              $sum: { $cond: [{ $eq: ["$twoFactorEnabled", true] }, 1, 0] },
-            },
-            avgTotalLogins: { $avg: "$metadata.totalLogins" },
-            avgSessionDuration: { $avg: "$metadata.averageSessionDuration" },
-            avgProfileCompleteness: {
-              $avg: "$metadata.activityTracking.profileCompleteness",
-            },
-            avgVerificationLevel: {
-              $avg: "$metadata.activityTracking.accountVerificationLevel",
-            },
-          },
-        },
-      ]);
-
-      const languageStats = await this.model.aggregate([
-        {
-          $match: {
-            isActive: true,
-            $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-          },
-        },
-        {
-          $group: {
-            _id: "$preferences.language",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-      ]);
-
-      const sourceStats = await this.model.aggregate([
-        {
-          $match: {
-            $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-          },
-        },
-        {
-          $group: {
-            _id: "$metadata.registrationSource",
-            count: { $sum: 1 },
-          },
-        },
-        { $sort: { count: -1 } },
-      ]);
-
-      // Estadísticas empresariales
-      const businessStats = await this.model.aggregate([
-        {
-          $match: {
-            isActive: true,
-            $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-          },
-        },
-        {
-          $group: {
-            _id: null,
-            avgSearchRadius: { $avg: "$preferences.business.searchRadius" },
-            autoTranslateUsers: {
-              $sum: {
-                $cond: [
-                  { $eq: ["$preferences.business.autoTranslate", true] },
-                  1,
-                  0,
-                ],
+              usersWithLanguageSwitches: {
+                $sum: { $cond: [{ $gt: ["$totalLanguageSwitches", 0] }, 1, 0] },
               },
-            },
-            usersWithBusinessPrefs: {
-              $sum: {
-                $cond: [
-                  {
-                    $gt: [
-                      {
-                        $size: {
-                          $ifNull: [
-                            "$preferences.business.preferredCategories",
-                            [],
-                          ],
-                        },
-                      },
-                      0,
-                    ],
-                  },
-                  1,
-                  0,
-                ],
+              usersWithMultiLanguageProfile: {
+                $sum: { $cond: ["$hasMultiLanguageProfile", 1, 0] },
+              },
+              autoTranslateUsers: {
+                $sum: {
+                  $cond: [{ $eq: ["$autoTranslateEnabled", true] }, 1, 0],
+                },
+              },
+              avgLanguageSwitches: { $avg: "$totalLanguageSwitches" },
+              languageDistribution: {
+                $push: "$primaryLanguage",
               },
             },
           },
-        },
-      ]);
-
-      return {
-        general: stats[0] || {
-          totalUsers: 0,
-          activeUsers: 0,
-          verifiedUsers: 0,
-          usersWithOAuth: 0,
-          usersWithCompletedProfiles: 0,
-          usersWithTwoFactor: 0,
-          avgTotalLogins: 0,
-          avgSessionDuration: 0,
-          avgProfileCompleteness: 0,
-          avgVerificationLevel: 0,
-        },
-        byLanguage: languageStats,
-        byRegistrationSource: sourceStats,
-        businessMetrics: businessStats[0] || {
-          avgSearchRadius: 0,
-          autoTranslateUsers: 0,
-          usersWithBusinessPrefs: 0,
-        },
+        ],
+        options: { enablePagination: false },
       };
+
+      const result = await this.executeAggregationPipeline(config);
+
+      if (result.length > 0) {
+        const stats = result[0];
+
+        // Calcular distribución de idiomas
+        const languageCount = {};
+        stats.languageDistribution.forEach((lang) => {
+          languageCount[lang] = (languageCount[lang] || 0) + 1;
+        });
+
+        return {
+          ...stats,
+          multiLanguageAdoptionRate:
+            (stats.multiLanguageUsers / stats.totalUsers) * 100,
+          languageSwitchAdoptionRate:
+            (stats.usersWithLanguageSwitches / stats.totalUsers) * 100,
+          profileTranslationRate:
+            (stats.usersWithMultiLanguageProfile / stats.totalUsers) * 100,
+          autoTranslateAdoptionRate:
+            (stats.autoTranslateUsers / stats.totalUsers) * 100,
+          languageDistribution: Object.entries(languageCount)
+            .sort(([, a], [, b]) => b - a)
+            .reduce((obj, [lang, count]) => ({ ...obj, [lang]: count }), {}),
+        };
+      }
+
+      return null;
     } catch (error) {
-      console.error("Error obteniendo estadísticas de usuarios:", error);
+      console.error("Error generando reporte multiidioma:", error);
       throw error;
     }
   }
+
+  // =============================================================================
+  // 🧹 UTILIDADES Y MANTENIMIENTO
+  // =============================================================================
 
   /**
    * Limpiar tokens expirados
    */
   async cleanExpiredTokens() {
     try {
-      const result = await this.model.updateMany(
-        {
-          $or: [
-            {
-              emailVerificationExpires: { $lt: new Date() },
-              emailVerificationToken: { $exists: true },
-            },
-            {
-              passwordResetExpires: { $lt: new Date() },
-              passwordResetToken: { $exists: true },
-            },
-          ],
-        },
-        {
-          $unset: {
-            emailVerificationToken: 1,
-            emailVerificationExpires: 1,
-            passwordResetToken: 1,
-            passwordResetExpires: 1,
-          },
-        }
-      );
-
-      console.log(`✅ Tokens expirados limpiados: ${result.modifiedCount}`);
-      return result;
+      return await this.model.cleanExpiredTokens();
     } catch (error) {
-      console.error("Error limpiando tokens expirados:", error);
+      console.error("Error limpiando tokens:", error);
       throw error;
     }
   }
 
-  // ===== MÉTODOS AUXILIARES =====
-
   /**
-   * Calcular completitud del perfil
-   * @param {Object} userData - Datos del usuario
+   * Migrar usuarios a multiidioma
    */
-  calculateProfileCompleteness(userData) {
-    const fields = [
-      "firstName",
-      "lastName",
-      "dateOfBirth",
-      "phone",
-      "bio",
-      "avatar",
-    ];
-
-    const completedFields = fields.filter((field) => {
-      const value = userData.profile?.[field] || userData[field];
-      return value && value.toString().trim().length > 0;
-    });
-
-    return Math.round((completedFields.length / fields.length) * 100) / 100;
-  }
-
-  /**
-   * Calcular nivel de verificación
-   * @param {Object} userData - Datos del usuario
-   */
-  calculateVerificationLevel(userData) {
-    let level = 0;
-
-    if (userData.isEmailVerified) level += 0.3;
-    if (userData.profile?.phone || userData.phone) level += 0.2;
-    if (userData.profile?.avatar || userData.avatar) level += 0.15;
-    if (userData.twoFactorEnabled) level += 0.25;
-    if (
-      userData.oauthProviders &&
-      Object.keys(userData.oauthProviders).some(
-        (p) => userData.oauthProviders[p]?.providerId
-      )
-    )
-      level += 0.1;
-
-    return Math.min(1, level);
-  }
-
-  /**
-   * Validar datos del perfil
-   * @param {Object} profileData - Datos del perfil a validar
-   */
-  validateProfileData(profileData) {
-    const validated = {};
-
-    if (profileData.firstName) {
-      validated.firstName = profileData.firstName.trim().substring(0, 50);
-    }
-
-    if (profileData.lastName) {
-      validated.lastName = profileData.lastName.trim().substring(0, 50);
-    }
-
-    if (profileData.dateOfBirth) {
-      const birthDate = new Date(profileData.dateOfBirth);
-      const today = new Date();
-      const age = today.getFullYear() - birthDate.getFullYear();
-
-      if (age >= 13 && age <= 120) {
-        validated.dateOfBirth = birthDate;
-      }
-    }
-
-    if (profileData.phone) {
-      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
-      const cleanPhone = profileData.phone.replace(/\s/g, "");
-      if (phoneRegex.test(cleanPhone)) {
-        validated.phone = cleanPhone;
-      }
-    }
-
-    if (profileData.bio) {
-      validated.bio = profileData.bio.trim().substring(0, 500);
-    }
-
-    if (profileData.website) {
-      const urlRegex = /^https?:\/\/.+/;
-      if (urlRegex.test(profileData.website)) {
-        validated.website = profileData.website;
-      }
-    }
-
-    if (profileData.avatar) {
-      const urlRegex = /^https?:\/\/.+/;
-      if (urlRegex.test(profileData.avatar)) {
-        validated.avatar = profileData.avatar;
-      }
-    }
-
-    return validated;
-  }
-
-  /**
-   * Construir filtro OAuth
-   * @param {boolean} hasOAuth - Si tiene OAuth o no
-   */
-  buildOAuthFilter(hasOAuth) {
-    if (hasOAuth) {
-      return {
-        $or: [
-          { "oauthProviders.google.providerId": { $exists: true } },
-          { "oauthProviders.facebook.providerId": { $exists: true } },
-          { "oauthProviders.apple.providerId": { $exists: true } },
-          { "oauthProviders.microsoft.providerId": { $exists: true } },
-        ],
-      };
-    } else {
-      return {
-        $and: [
-          { "oauthProviders.google.providerId": { $exists: false } },
-          { "oauthProviders.facebook.providerId": { $exists: false } },
-          { "oauthProviders.apple.providerId": { $exists: false } },
-          { "oauthProviders.microsoft.providerId": { $exists: false } },
-        ],
-      };
-    }
-  }
-
-  /**
-   * Generar secreto para 2FA
-   */
-  generateTwoFactorSecret() {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let secret = "";
-    for (let i = 0; i < 32; i++) {
-      secret += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return secret;
-  }
-
-  /**
-   * Generar códigos de respaldo para 2FA
-   */
-  generateBackupCodes() {
-    const codes = [];
-    for (let i = 0; i < 10; i++) {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      codes.push(code);
-    }
-    return codes;
-  }
-
-  /**
-   * Generar URL para código QR de 2FA
-   * @param {string} email - Email del usuario
-   * @param {string} secret - Secreto 2FA
-   */
-  generateQRCodeUrl(email, secret) {
-    const appName = encodeURIComponent("Business Locator");
-    const accountName = encodeURIComponent(email);
-    return `otpauth://totp/${appName}:${accountName}?secret=${secret}&issuer=${appName}`;
-  }
-
-  /**
-   * Calcular métricas detalladas de usuario
-   * @param {string} userId - ID del usuario
-   * @param {Object} options - Opciones de cálculo
-   */
-  async calculateDetailedUserMetrics(userId, options = {}) {
+  async migrateToMultiLanguage(batchSize = 100) {
     try {
-      // Implementar métricas detalladas específicas para la plataforma empresarial
-      const metrics = await this.model.aggregate([
-        { $match: { _id: new Types.ObjectId(userId) } },
-        {
-          $lookup: {
-            from: "usersessions",
-            let: { userId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$userId", "$$userId"] } } },
+      let migrated = 0;
+      let skip = 0;
+
+      while (true) {
+        const users = await this.model
+          .find({
+            $and: [
               {
-                $group: {
-                  _id: { $dayOfWeek: "$createdAt" },
-                  count: { $sum: 1 },
-                  avgDuration: { $avg: "$metadata.sessionDuration" },
-                },
+                $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+              },
+              {
+                $or: [
+                  { "profile.firstName": { $type: "string" } },
+                  { "profile.lastName": { $type: "string" } },
+                ],
               },
             ],
-            as: "weeklyPatterns",
-          },
-        },
-      ]);
+          })
+          .limit(batchSize)
+          .skip(skip)
+          .lean();
+
+        if (users.length === 0) break;
+
+        const bulkOps = users.map((user) => {
+          const updates = {};
+          const userLanguage = user.preferences?.language || DEFAULT_LANGUAGE;
+
+          if (typeof user.profile?.firstName === "string") {
+            updates["profile.firstName"] = {
+              original: {
+                language: userLanguage,
+                text: user.profile.firstName,
+                createdAt: new Date(),
+                lastModified: new Date(),
+              },
+              translations: {},
+              translationLanguages: [],
+              translationConfig: {
+                autoTranslate: true,
+                targetLanguages: [],
+              },
+            };
+          }
+
+          if (typeof user.profile?.lastName === "string") {
+            updates["profile.lastName"] = {
+              original: {
+                language: userLanguage,
+                text: user.profile.lastName,
+                createdAt: new Date(),
+                lastModified: new Date(),
+              },
+              translations: {},
+              translationLanguages: [],
+              translationConfig: {
+                autoTranslate: true,
+                targetLanguages: [],
+              },
+            };
+          }
+
+          return {
+            updateOne: {
+              filter: { _id: user._id },
+              update: { $set: updates },
+            },
+          };
+        });
+
+        if (bulkOps.length > 0) {
+          await this.model.bulkWrite(bulkOps);
+          migrated += bulkOps.length;
+        }
+
+        skip += batchSize;
+        console.log(`Migrados ${migrated} usuarios a multiidioma...`);
+      }
 
       return {
-        weeklyUsagePatterns: metrics[0]?.weeklyPatterns || [],
-        // TODO: Agregar más métricas detalladas según necesidades empresariales
-        calculatedAt: new Date(),
+        message: "Migración completada",
+        totalMigrated: migrated,
       };
     } catch (error) {
-      console.error("Error calculando métricas detalladas:", error);
-      return {};
+      console.error("Error en migración multiidioma:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validar integridad de datos multiidioma
+   */
+  async validateMultiLanguageIntegrity() {
+    try {
+      const issues = [];
+
+      // Buscar usuarios con campos multiidioma malformados
+      const malformedUsers = await this.model.find(
+        {
+          $or: [
+            { "profile.firstName.original.text": { $exists: false } },
+            { "profile.lastName.original.text": { $exists: false } },
+            {
+              "profile.firstName.original.language": {
+                $nin: SUPPORTED_LANGUAGES,
+              },
+            },
+            {
+              "profile.lastName.original.language": {
+                $nin: SUPPORTED_LANGUAGES,
+              },
+            },
+          ],
+          $and: [
+            { $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }] },
+            { isActive: true },
+          ],
+        },
+        { _id: 1, email: 1, "profile.firstName": 1, "profile.lastName": 1 }
+      );
+
+      if (malformedUsers.length > 0) {
+        issues.push({
+          type: "malformed_multilang_fields",
+          count: malformedUsers.length,
+          users: malformedUsers.slice(0, 5), // Solo primeros 5 como muestra
+        });
+      }
+
+      // Verificar idiomas no soportados
+      const unsupportedLanguageUsers = await this.model.find(
+        {
+          "preferences.language": { $nin: SUPPORTED_LANGUAGES },
+        },
+        { _id: 1, email: 1, "preferences.language": 1 }
+      );
+
+      if (unsupportedLanguageUsers.length > 0) {
+        issues.push({
+          type: "unsupported_languages",
+          count: unsupportedLanguageUsers.length,
+          users: unsupportedLanguageUsers.slice(0, 5),
+        });
+      }
+
+      return {
+        isValid: issues.length === 0,
+        issues: issues,
+        summary: `Encontrados ${issues.length} tipos de problemas en integridad multiidioma`,
+      };
+    } catch (error) {
+      console.error("Error validando integridad multiidioma:", error);
+      throw error;
     }
   }
 }
+
+export default UserRepository;
