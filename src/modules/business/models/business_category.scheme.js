@@ -4,7 +4,7 @@
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
   CommonValidators,
 } from "../../core/models/base.scheme.js";
@@ -464,7 +464,7 @@ const BusinessCategorySchema = new mongoose.Schema({
   },
 
   // Campos base de auditoría
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar el esquema con funcionalidades base

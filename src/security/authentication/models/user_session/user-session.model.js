@@ -4,7 +4,7 @@
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
 } from "../../../core/models/base.scheme.js";
 
@@ -367,7 +367,7 @@ const UserSessionSchema = new mongoose.Schema(
     // CAMPOS BASE DE AUDITORÍA (OPCIONAL)
     // ================================
     // Descomenta si quieres campos de auditoría base
-    // ...BaseSchemeFields,
+    // ...BaseSchemaFields,
   },
   {
     timestamps: false, // Manejamos timestamps manualmente

@@ -4,7 +4,7 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
 } from "../../core/models/base.scheme.js";
 import {
@@ -317,7 +317,7 @@ const TranslationCacheSchema = new mongoose.Schema({
   },
 
   // Campos base (auditoría, soft delete, etc.)
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar el esquema con funcionalidades base

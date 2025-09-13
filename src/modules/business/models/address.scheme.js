@@ -3,7 +3,7 @@
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
 } from "../../core/models/base.scheme.js";
 import {
@@ -474,12 +474,12 @@ const AddressSchema = new mongoose.Schema({
   ],
 
   // Campos base de auditoría
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar esquema con funcionalidades base
 setupBaseSchema(AddressSchema, {
-  addTimestamps: false, // Ya incluidos en BaseSchemeFields
+  addTimestamps: false, // Ya incluidos en BaseSchemaFields
 });
 
 // ================================

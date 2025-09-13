@@ -3,7 +3,7 @@
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
   CommonValidators,
 } from "../../../core/models/base.scheme.js";
@@ -151,7 +151,7 @@ const UserSchema = new mongoose.Schema({
   },
 
   // Campos base (auditoría, soft delete, etc.)
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // ================================

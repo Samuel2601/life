@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
 } from "../../../modules/core/models/base.scheme.js";
 import { createMultiLanguageField } from "../../../modules/core/models/multi_language_pattern.scheme.js";
@@ -127,7 +127,7 @@ const RoleSchema = new mongoose.Schema({
   notificationSettings: NotificationSettingsSchema,
 
   // Campos base (auditoría, soft delete, etc.)
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar el esquema con funcionalidades base

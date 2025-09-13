@@ -5,7 +5,7 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
 } from "../../../modules/core/models/base.scheme.js";
 
@@ -629,7 +629,7 @@ const UserSessionSchema = new mongoose.Schema({
   },
 
   // Campos base de auditoría
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar esquema con funcionalidades base

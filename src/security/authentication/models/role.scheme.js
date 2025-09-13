@@ -1,16 +1,22 @@
 // =============================================================================
-// src/modules/authentication/models/role.scheme.js - VERSIÓN OPTIMIZADA
-// Mantiene la simplicidad del primer esquema + mejoras selectivas del segundo
+// src/modules/authentication/models/role.scheme.js - INTEGRACIÓN COMPLETA
+// Integrado con base.scheme.js y multi_language_pattern_improved.scheme.js
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
+  CommonValidators,
 } from "../../../modules/core/models/base.scheme.js";
-import { createMultiLanguageField } from "../../../modules/core/models/multi_language_pattern.scheme.js";
+import {
+  createMultiLanguageField,
+  MultiLanguageValidators,
+  SUPPORTED_LANGUAGES,
+  DEFAULT_LANGUAGE,
+} from "../../../modules/core/models/multi_language_pattern_improved.scheme.js";
 
 /**
- * Schema para permisos específicos embebidos (optimizado)
+ * Schema para permisos específicos embebidos
  */
 const PermissionSchema = new mongoose.Schema(
   {
@@ -71,7 +77,7 @@ const PermissionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },
-    // Restricciones geográficas básicas (del segundo esquema)
+    // Restricciones geográficas básicas
     geographicRestrictions: {
       allowedCountries: [String], // ISO codes
       allowedRegions: [String],
@@ -80,7 +86,7 @@ const PermissionSchema = new mongoose.Schema(
         default: false,
       },
     },
-    // Restricciones de horario (simplificadas)
+    // Restricciones de horario
     timeRestrictions: {
       businessHoursOnly: {
         type: Boolean,
@@ -96,7 +102,7 @@ const PermissionSchema = new mongoose.Schema(
 );
 
 /**
- * Schema principal de Rol (optimizado)
+ * Schema principal de Rol - Integrado con base.scheme.js
  */
 const RoleSchema = new mongoose.Schema({
   // Información básica del rol
@@ -115,11 +121,25 @@ const RoleSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Nombre para mostrar (NUEVO: multiidioma para UI)
-  displayName: createMultiLanguageField(true),
+  // Nombre para mostrar - Integrado con patrón multiidioma mejorado
+  displayName: createMultiLanguageField(true, {
+    textIndex: true,
+    validator: [
+      MultiLanguageValidators.hasOriginalText,
+      MultiLanguageValidators.minLength(2),
+      MultiLanguageValidators.maxLength(100),
+    ],
+  }),
 
-  // Descripción (NUEVO: multiidioma para documentación)
-  description: createMultiLanguageField(false),
+  // Descripción - Integrado con patrón multiidioma mejorado
+  description: createMultiLanguageField(false, {
+    textIndex: true,
+    validator: [
+      MultiLanguageValidators.hasOriginalText,
+      MultiLanguageValidators.minLength(10),
+      MultiLanguageValidators.maxLength(500),
+    ],
+  }),
 
   // Permisos del rol (mantener embebidos para rendimiento)
   permissions: [PermissionSchema],
@@ -144,12 +164,7 @@ const RoleSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Role",
     default: null,
-    validate: {
-      validator: function (v) {
-        return !v || !this._id || !v.equals(this._id);
-      },
-      message: "Un rol no puede ser su propio padre",
-    },
+    validate: CommonValidators.objectId,
   },
 
   // Configuración del rol
@@ -162,6 +177,14 @@ const RoleSchema = new mongoose.Schema({
   isDefault: {
     type: Boolean,
     default: false,
+    index: true,
+  },
+
+  // IMPORTANTE: isActive específico del rol (independiente del virtual del base)
+  // Este controla si el rol puede ser usado/asignado
+  isRoleActive: {
+    type: Boolean,
+    default: true,
     index: true,
   },
 
@@ -178,7 +201,7 @@ const RoleSchema = new mongoose.Schema({
     index: true,
   },
 
-  // Restricciones específicas de empresa (mejoradas)
+  // Restricciones específicas de empresa
   companyRestrictions: {
     canManageAllCompanies: {
       type: Boolean,
@@ -192,6 +215,7 @@ const RoleSchema = new mongoose.Schema({
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Business",
+        validate: CommonValidators.objectId,
       },
     ],
     maxCompaniesManaged: {
@@ -199,18 +223,17 @@ const RoleSchema = new mongoose.Schema({
       default: 1,
       min: [0, "El máximo de empresas no puede ser negativo"],
     },
-    // NUEVO: restricciones por categoría de empresa
     allowedBusinessCategories: [String],
     excludedBusinessCategories: [String],
   },
 
-  // Restricciones geográficas (simplificadas)
+  // Restricciones geográficas
   geographicRestrictions: {
     allowedCountries: [
       {
         type: String,
         uppercase: true,
-        length: 2,
+        match: [/^[A-Z]{2}$/, "Debe ser código de país ISO de 2 letras"],
       },
     ],
     allowedRegions: [String],
@@ -220,7 +243,7 @@ const RoleSchema = new mongoose.Schema({
     },
   },
 
-  // NUEVO: Configuración de sesión específica por rol
+  // Configuración de sesión específica por rol
   sessionConfig: {
     maxConcurrentSessions: {
       type: Number,
@@ -244,7 +267,7 @@ const RoleSchema = new mongoose.Schema({
     },
   },
 
-  // Metadatos del rol (expandidos)
+  // Metadatos del rol
   metadata: {
     color: {
       type: String,
@@ -271,15 +294,17 @@ const RoleSchema = new mongoose.Schema({
       min: 0,
       max: 10,
     },
-    // NUEVO: metadatos para UI
-    badgeText: String,
+    badgeText: {
+      type: String,
+      maxlength: 20,
+    },
     sortOrder: {
       type: Number,
       default: 0,
     },
   },
 
-  // Estadísticas del rol (mejoradas)
+  // Estadísticas del rol
   stats: {
     userCount: {
       type: Number,
@@ -294,17 +319,17 @@ const RoleSchema = new mongoose.Schema({
       default: 0,
       min: 0,
     },
-    // NUEVO: estadísticas de uso
     avgSessionDuration: {
       type: Number,
       default: 0,
+      min: 0,
     },
     lastUsed: {
       type: Date,
     },
   },
 
-  // NUEVO: Configuración de notificaciones por rol
+  // Configuración de notificaciones por rol
   notificationSettings: {
     enableSystemNotifications: {
       type: Boolean,
@@ -317,7 +342,7 @@ const RoleSchema = new mongoose.Schema({
     notificationChannels: [
       {
         type: String,
-        enum: ["email", "sms", "push", "in_app"],
+        enum: ["email", "sms", "push", "inApp"],
       },
     ],
     dailyDigest: {
@@ -325,33 +350,40 @@ const RoleSchema = new mongoose.Schema({
       default: false,
     },
   },
-
-  // Campos base (auditoría, soft delete, etc.)
-  ...BaseSchemeFields,
 });
+
+// =======================================
+// CONFIGURAR EL ESQUEMA CON BASE SCHEME
+// =======================================
 
 // Configurar el esquema con funcionalidades base
 setupBaseSchema(RoleSchema, {
-  addBaseFields: false,
+  addBaseFields: true, // Agregar campos base (isDeleted, createdAt, etc.)
+  addTimestamps: true, // Agregar middleware de timestamps
+  addIndexes: true, // Agregar índices comunes
+  addVirtuals: true, // Agregar virtuals comunes
+  addMethods: true, // Agregar métodos comunes (softDelete, restore, etc.)
+  addStatics: true, // Agregar métodos estáticos (findActive, etc.)
+  addHelpers: true, // Agregar query helpers (active(), deleted(), etc.)
 });
 
 // ================================
-// ÍNDICES ESPECÍFICOS (optimizados)
+// ÍNDICES ESPECÍFICOS
 // ================================
 
 // Índices únicos
 RoleSchema.index({ roleName: 1 }, { unique: true });
 
 // Índices compuestos para consultas frecuentes
-RoleSchema.index({ hierarchy: 1, isActive: 1 });
-RoleSchema.index({ isActive: 1, isSystemRole: 1 });
+RoleSchema.index({ hierarchy: 1, isRoleActive: 1 });
+RoleSchema.index({ isRoleActive: 1, isSystemRole: 1 });
 RoleSchema.index({
   "metadata.category": 1,
-  isActive: 1,
+  isRoleActive: 1,
   "metadata.sortOrder": 1,
 });
 RoleSchema.index({ parentRole: 1, hierarchy: 1 });
-RoleSchema.index({ roleType: 1, isActive: 1 });
+RoleSchema.index({ roleType: 1, isRoleActive: 1 });
 
 // TTL index para roles con expiración
 RoleSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
@@ -360,8 +392,12 @@ RoleSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 RoleSchema.index({ "companyRestrictions.allowedCompanies": 1 });
 RoleSchema.index({ "geographicRestrictions.allowedCountries": 1 });
 
+// Índices para campos multiidioma
+RoleSchema.index({ "displayName.original.text": "text" });
+RoleSchema.index({ "description.original.text": "text" });
+
 // ================================
-// VIRTUALS (mejorados)
+// VIRTUALS ESPECÍFICOS DEL ROL
 // ================================
 
 RoleSchema.virtual("isExpired").get(function () {
@@ -378,7 +414,6 @@ RoleSchema.virtual("usagePercentage").get(function () {
   return Math.round((this.stats.userCount / this.maxUsers) * 100);
 });
 
-// NUEVO: Virtual para obtener nivel de seguridad
 RoleSchema.virtual("securityLevel").get(function () {
   if (this.hierarchy >= 90) return "critical";
   if (this.hierarchy >= 70) return "high";
@@ -386,13 +421,18 @@ RoleSchema.virtual("securityLevel").get(function () {
   return "standard";
 });
 
+// Virtual que combina el estado del rol con el soft delete
+RoleSchema.virtual("isFullyActive").get(function () {
+  return this.isRoleActive && !this.isDeleted && !this.isExpired;
+});
+
 // ================================
-// MÉTODOS DE INSTANCIA (optimizados)
+// MÉTODOS DE INSTANCIA
 // ================================
 
-// Método principal para verificar permisos (mantener compatibilidad)
+// Método principal para verificar permisos
 RoleSchema.methods.hasPermission = function (resource, action, scope = "own") {
-  if (!this.isActive || this.isExpired) {
+  if (!this.isFullyActive) {
     return false;
   }
 
@@ -421,7 +461,7 @@ RoleSchema.methods.hasPermission = function (resource, action, scope = "own") {
   return permissionScopeLevel >= requiredScopeLevel;
 };
 
-// NUEVO: Método para verificar permisos con contexto geográfico
+// Método para verificar permisos con contexto geográfico
 RoleSchema.methods.hasPermissionWithLocation = function (
   resource,
   action,
@@ -457,7 +497,7 @@ RoleSchema.methods.hasPermissionWithLocation = function (
   return true;
 };
 
-// Mantener métodos existentes para compatibilidad
+// Métodos para gestión de permisos
 RoleSchema.methods.addPermission = function (
   resource,
   actions,
@@ -508,8 +548,9 @@ RoleSchema.methods.removePermission = function (resource, action = null) {
   return this;
 };
 
+// Métodos para gestión de empresas
 RoleSchema.methods.canManageCompany = function (companyId = null) {
-  if (!this.isActive || this.isExpired) {
+  if (!this.isFullyActive) {
     return false;
   }
 
@@ -530,6 +571,7 @@ RoleSchema.methods.canManageCompany = function (companyId = null) {
   return !restrictions.restrictedToOwnCompany;
 };
 
+// Método para verificar restricciones geográficas
 RoleSchema.methods.checkGeographicRestrictions = function (
   country = null,
   region = null
@@ -563,7 +605,7 @@ RoleSchema.methods.checkGeographicRestrictions = function (
   return true;
 };
 
-// NUEVO: Método para obtener configuración de sesión efectiva
+// Método para obtener configuración de sesión efectiva
 RoleSchema.methods.getEffectiveSessionConfig = function () {
   const defaultConfig = {
     maxConcurrentSessions: 3,
@@ -578,7 +620,7 @@ RoleSchema.methods.getEffectiveSessionConfig = function () {
   };
 };
 
-// NUEVO: Método para verificar si requiere aprobación para acciones específicas
+// Método para verificar si requiere aprobación
 RoleSchema.methods.requiresApprovalFor = function (resource, action) {
   const permission = this.permissions.find(
     (p) => p.resource === resource || p.resource === "all"
@@ -586,7 +628,6 @@ RoleSchema.methods.requiresApprovalFor = function (resource, action) {
 
   if (!permission) return false;
 
-  // Acciones que siempre requieren aprobación para ciertos roles
   const criticalActions = ["delete", "manage", "admin"];
   const requiresApprovalActions = permission.conditions?.requiresApproval || [];
 
@@ -596,6 +637,7 @@ RoleSchema.methods.requiresApprovalFor = function (resource, action) {
   );
 };
 
+// Método para obtener resumen de permisos
 RoleSchema.methods.getPermissionsSummary = function () {
   const summary = {
     totalPermissions: this.permissions.length,
@@ -625,88 +667,115 @@ RoleSchema.methods.getPermissionsSummary = function () {
   return summary;
 };
 
+// Métodos para trabajar con campos multiidioma
+RoleSchema.methods.getDisplayName = function (
+  language = DEFAULT_LANGUAGE,
+  fallbackLanguages = ["en", "es"]
+) {
+  if (!this.displayName) return this.roleName;
+
+  const result = this.displayName.getText(language, fallbackLanguages);
+  return result.text;
+};
+
+RoleSchema.methods.getDescription = function (
+  language = DEFAULT_LANGUAGE,
+  fallbackLanguages = ["en", "es"]
+) {
+  if (!this.description) return "";
+
+  const result = this.description.getText(language, fallbackLanguages);
+  return result.text;
+};
+
 // ================================
-// MÉTODOS ESTÁTICOS (mantener compatibilidad)
+// MÉTODOS ESTÁTICOS
 // ================================
 
 RoleSchema.statics.findByName = function (roleName) {
   return this.findOne({
     roleName: roleName.toLowerCase(),
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
+    isRoleActive: true,
+  }).active(); // Usar query helper del base
 };
 
 RoleSchema.statics.findByHierarchy = function (minLevel = 0, maxLevel = 100) {
   return this.find({
     hierarchy: { $gte: minLevel, $lte: maxLevel },
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  }).sort({ hierarchy: 1 });
+    isRoleActive: true,
+  })
+    .active()
+    .sort({ hierarchy: 1 });
 };
 
 RoleSchema.statics.getSystemRoles = function () {
   return this.find({
     isSystemRole: true,
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  }).sort({ hierarchy: 1 });
+    isRoleActive: true,
+  })
+    .active()
+    .sort({ hierarchy: 1 });
 };
 
 RoleSchema.statics.getDefaultRole = function () {
   return this.findOne({
     isDefault: true,
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
-  });
+    isRoleActive: true,
+  }).active();
 };
 
-// NUEVO: Método para obtener roles por tipo con paginación
 RoleSchema.statics.getRolesByType = function (roleType, options = {}) {
   const query = {
     roleType: roleType,
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
+    isRoleActive: true,
   };
 
-  const queryObj = this.find(query);
+  let queryObj = this.find(query).active();
 
   if (options.populate) {
-    queryObj.populate(options.populate);
+    queryObj = queryObj.populate(options.populate);
   }
 
   if (options.sortBy) {
     const sort = {};
     sort[options.sortBy] = options.sortOrder === "desc" ? -1 : 1;
-    queryObj.sort(sort);
+    queryObj = queryObj.sort(sort);
   } else {
-    queryObj.sort({ "metadata.sortOrder": 1, hierarchy: -1 });
+    queryObj = queryObj.sort({ "metadata.sortOrder": 1, hierarchy: -1 });
   }
 
   if (options.limit) {
-    queryObj.limit(options.limit);
+    queryObj = queryObj.limit(options.limit);
   }
 
   return queryObj;
 };
 
-// Actualizar método de creación de roles del sistema
+// Método para crear roles del sistema con soporte multiidioma
 RoleSchema.statics.createSystemRoles = async function () {
+  const { MultiLanguageContentSchema } = await import(
+    "../../../modules/core/models/multi_language_pattern_improved.scheme.js"
+  );
+
   const systemRoles = [
     {
       roleName: "super_admin",
-      displayName: {
-        original: { language: "es", text: "Super Administrador" },
-        translations: new Map([
-          ["en", { text: "Super Administrator", translatedAt: new Date() }],
-        ]),
-      },
-      description: {
-        original: { language: "es", text: "Acceso completo al sistema" },
-        translations: new Map([
-          ["en", { text: "Complete system access", translatedAt: new Date() }],
-        ]),
-      },
+      displayName: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Super Administrador",
+        "es",
+        {
+          targetLanguages: ["en", "fr"],
+          autoTranslate: true,
+        }
+      ),
+      description: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Acceso completo al sistema con permisos administrativos totales",
+        "es",
+        {
+          targetLanguages: ["en", "fr"],
+          autoTranslate: true,
+        }
+      ),
       hierarchy: 100,
       roleType: "system",
       isSystemRole: true,
@@ -731,27 +800,22 @@ RoleSchema.statics.createSystemRoles = async function () {
     },
     {
       roleName: "business_owner",
-      displayName: {
-        original: { language: "es", text: "Propietario de Empresa" },
-        translations: new Map([
-          ["en", { text: "Business Owner", translatedAt: new Date() }],
-        ]),
-      },
-      description: {
-        original: {
-          language: "es",
-          text: "Propietario que puede gestionar su empresa",
-        },
-        translations: new Map([
-          [
-            "en",
-            {
-              text: "Owner who can manage their business",
-              translatedAt: new Date(),
-            },
-          ],
-        ]),
-      },
+      displayName: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Propietario de Empresa",
+        "es",
+        {
+          targetLanguages: ["en"],
+          autoTranslate: true,
+        }
+      ),
+      description: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Propietario que puede gestionar completamente su empresa y ver reportes",
+        "es",
+        {
+          targetLanguages: ["en"],
+          autoTranslate: true,
+        }
+      ),
       hierarchy: 50,
       roleType: "business",
       isSystemRole: true,
@@ -786,27 +850,22 @@ RoleSchema.statics.createSystemRoles = async function () {
     },
     {
       roleName: "customer",
-      displayName: {
-        original: { language: "es", text: "Cliente" },
-        translations: new Map([
-          ["en", { text: "Customer", translatedAt: new Date() }],
-        ]),
-      },
-      description: {
-        original: {
-          language: "es",
-          text: "Usuario cliente con permisos básicos",
-        },
-        translations: new Map([
-          [
-            "en",
-            {
-              text: "Customer user with basic permissions",
-              translatedAt: new Date(),
-            },
-          ],
-        ]),
-      },
+      displayName: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Cliente",
+        "es",
+        {
+          targetLanguages: ["en"],
+          autoTranslate: true,
+        }
+      ),
+      description: MultiLanguageContentSchema.statics.createAdvancedContent(
+        "Usuario cliente con permisos básicos para ver empresas y crear reseñas",
+        "es",
+        {
+          targetLanguages: ["en"],
+          autoTranslate: true,
+        }
+      ),
       hierarchy: 10,
       roleType: "customer",
       isSystemRole: true,
@@ -851,9 +910,7 @@ RoleSchema.statics.createSystemRoles = async function () {
         const role = new this(roleData);
         await role.save();
         createdRoles.push(role);
-        console.log(
-          `✅ Rol del sistema creado: ${roleData.displayName.original.text}`
-        );
+        console.log(`✅ Rol del sistema creado: ${role.getDisplayName()}`);
       }
     } catch (error) {
       console.error(
@@ -869,10 +926,8 @@ RoleSchema.statics.createSystemRoles = async function () {
 RoleSchema.statics.updateRoleStats = async function (roleId) {
   const User = mongoose.model("User");
 
-  const userCount = await User.countDocuments({
+  const userCount = await User.countActive({
     roles: roleId,
-    isActive: true,
-    $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
   });
 
   await this.findByIdAndUpdate(roleId, {
@@ -884,14 +939,16 @@ RoleSchema.statics.updateRoleStats = async function (roleId) {
 };
 
 // ================================
-// MIDDLEWARES (mantener compatibilidad)
+// MIDDLEWARES
 // ================================
 
+// Pre-save middleware específico del rol
 RoleSchema.pre("save", async function (next) {
   if (this.roleName) {
     this.roleName = this.roleName.toLowerCase().trim();
   }
 
+  // Validación de jerarquía con rol padre
   if (this.parentRole && this.hierarchy !== undefined) {
     try {
       const parentRole = await this.constructor.findById(this.parentRole);
@@ -905,6 +962,7 @@ RoleSchema.pre("save", async function (next) {
     }
   }
 
+  // Asegurar que solo hay un rol por defecto
   if (this.isDefault && this.isModified("isDefault")) {
     await this.constructor.updateMany(
       { _id: { $ne: this._id } },
@@ -915,13 +973,36 @@ RoleSchema.pre("save", async function (next) {
   next();
 });
 
+// Post-save middleware
 RoleSchema.post("save", function (doc, next) {
   if (doc.isNew) {
-    console.log(
-      `✅ Rol creado: ${doc.displayName?.original?.text || doc.roleName}`
-    );
+    console.log(`✅ Rol creado: ${doc.getDisplayName()}`);
   }
   next();
+});
+
+// ================================
+// CONFIGURACIÓN ADICIONAL
+// ================================
+
+// Configurar transformación JSON
+RoleSchema.set("toJSON", {
+  virtuals: true,
+  transform: function (doc, ret) {
+    // Eliminar campos internos
+    delete ret.__v;
+
+    // Transformar campos multiidioma para respuesta
+    if (ret.displayName && typeof ret.displayName.getText === "function") {
+      ret.displayNameText = ret.displayName.getText();
+    }
+
+    if (ret.description && typeof ret.description.getText === "function") {
+      ret.descriptionText = ret.description.getText();
+    }
+
+    return ret;
+  },
 });
 
 // ================================

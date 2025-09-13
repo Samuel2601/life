@@ -3,7 +3,7 @@
 // =============================================================================
 import mongoose from "mongoose";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   addTimestampMiddleware,
   addCommonIndexes,
 } from "../base/BaseSchema.js";
@@ -176,7 +176,7 @@ const FileUploadSchema = new mongoose.Schema({
     default: Date.now,
   },
 
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Índices específicos

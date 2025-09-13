@@ -1,14 +1,15 @@
 // =============================================================================
-// src/modules/core/models/base.scheme.js
+// src/modules/core/models/base.schema.js - VERSIÓN ESTANDARIZADA
+// Usando camelCase como estándar y solo isDeleted para soft delete
 // =============================================================================
 import mongoose from "mongoose";
 
 /**
  * Campos base para todos los esquemas con auditoría y soft delete
- * Estos campos se agregan automáticamente a todos los modelos
+ * ESTÁNDAR: camelCase para todos los nombres de campo
  */
-export const BaseSchemeFields = {
-  // Soft delete
+export const BaseSchemaFields = {
+  // Soft delete - SOLO usando isDeleted (no isActive para evitar confusión)
   isDeleted: {
     type: Boolean,
     default: false,
@@ -38,7 +39,6 @@ export const BaseSchemeFields = {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
     required: function () {
-      // No requerir createdBy para el primer usuario (bootstrap)
       return (
         this.constructor.modelName !== "User" ||
         mongoose.models.User?.countDocuments?.() > 0
@@ -71,10 +71,8 @@ export const BaseSchemeFields = {
 
 /**
  * Middleware para actualizar timestamps automáticamente
- * @param {mongoose.Schema} schema - Esquema al que se aplica el middleware
  */
 export const addTimestampMiddleware = (schema) => {
-  // Pre-save para documentos nuevos y actualizados
   schema.pre("save", function (next) {
     const now = new Date();
 
@@ -82,7 +80,6 @@ export const addTimestampMiddleware = (schema) => {
       this.createdAt = now;
       this.version = 1;
     } else {
-      // Incrementar versión en cada actualización
       this.version = (this.version || 1) + 1;
     }
 
@@ -90,20 +87,16 @@ export const addTimestampMiddleware = (schema) => {
     next();
   });
 
-  // Pre-save para operaciones de actualización (findOneAndUpdate, updateOne, etc.)
   schema.pre(["findOneAndUpdate", "updateOne", "updateMany"], function (next) {
     const update = this.getUpdate();
     const now = new Date();
 
-    // Asegurar que existe el objeto $set
     if (!update.$set) {
       update.$set = {};
     }
 
-    // Actualizar timestamp
     update.$set.updatedAt = now;
 
-    // Incrementar versión
     if (!update.$inc) {
       update.$inc = {};
     }
@@ -114,34 +107,25 @@ export const addTimestampMiddleware = (schema) => {
 };
 
 /**
- * Agregar índices comunes para optimización
- * @param {mongoose.Schema} schema - Esquema al que se aplican los índices
+ * Agregar índices comunes
  */
 export const addCommonIndexes = (schema) => {
-  // Índice compuesto para soft delete y fecha de creación
   schema.index({ isDeleted: 1, createdAt: -1 });
-
-  // Índice para consultas por creador
   schema.index({ createdBy: 1, createdAt: -1 });
-
-  // Índice para versionado
   schema.index({ version: 1 });
-
-  // Índice para búsquedas por fecha de actualización
   schema.index({ updatedAt: -1 });
 };
 
 /**
  * Agregar métodos virtuales comunes
- * @param {mongoose.Schema} schema - Esquema al que se aplican los virtuales
  */
 export const addCommonVirtuals = (schema) => {
-  // Virtual para verificar si está eliminado
-  schema.virtual("deleted").get(function () {
-    return this.isDeleted;
+  // Virtual para verificar si está activo (inverso de isDeleted)
+  schema.virtual("isActive").get(function () {
+    return !this.isDeleted;
   });
 
-  // Virtual para obtener el tiempo transcurrido desde creación
+  // Virtual para tiempo transcurrido desde creación
   schema.virtual("createdAgo").get(function () {
     if (!this.createdAt) return null;
 
@@ -157,7 +141,7 @@ export const addCommonVirtuals = (schema) => {
     return `Hace ${Math.floor(diffDays / 365)} años`;
   });
 
-  // Virtual para obtener el tiempo transcurrido desde última actualización
+  // Virtual para tiempo transcurrido desde última actualización
   schema.virtual("updatedAgo").get(function () {
     if (!this.updatedAt) return null;
 
@@ -174,7 +158,6 @@ export const addCommonVirtuals = (schema) => {
 
 /**
  * Agregar métodos de instancia comunes
- * @param {mongoose.Schema} schema - Esquema al que se aplican los métodos
  */
 export const addCommonMethods = (schema) => {
   // Método para realizar soft delete
@@ -184,7 +167,6 @@ export const addCommonMethods = (schema) => {
     this.deletedBy = deletedBy;
     this.deletionReason = reason;
     this.updatedBy = deletedBy;
-
     return this.save();
   };
 
@@ -196,14 +178,8 @@ export const addCommonMethods = (schema) => {
     this.deletionReason = null;
     this.updatedBy = restoredBy;
     this.lastChangeReason = reason || "Documento restaurado";
-
     return this.save();
   };
-
-  // Método para verificar si el documento está activo
-  /*schema.methods.isActive = function () {
-    return !this.isDeleted;
-  };*/
 
   // Método para agregar razón de cambio
   schema.methods.addChangeReason = function (reason) {
@@ -221,6 +197,7 @@ export const addCommonMethods = (schema) => {
       updatedBy: this.updatedBy,
       lastChangeReason: this.lastChangeReason,
       isDeleted: this.isDeleted,
+      isActive: this.isActive, // usar el virtual
       deletedAt: this.deletedAt,
       deletedBy: this.deletedBy,
       deletionReason: this.deletionReason,
@@ -230,10 +207,9 @@ export const addCommonMethods = (schema) => {
 
 /**
  * Agregar métodos estáticos comunes
- * @param {mongoose.Schema} schema - Esquema al que se aplican los métodos estáticos
  */
 export const addCommonStatics = (schema) => {
-  // Método para encontrar solo documentos activos (no eliminados)
+  // Encontrar solo documentos activos (no eliminados)
   schema.statics.findActive = function (filter = {}) {
     return this.find({
       ...filter,
@@ -241,15 +217,12 @@ export const addCommonStatics = (schema) => {
     });
   };
 
-  // Método para encontrar solo documentos eliminados
+  // Encontrar solo documentos eliminados
   schema.statics.findDeleted = function (filter = {}) {
-    return this.find({
-      ...filter,
-      isDeleted: true,
-    });
+    return this.find({ ...filter, isDeleted: true });
   };
 
-  // Método para contar documentos activos
+  // Contar documentos activos
   schema.statics.countActive = function (filter = {}) {
     return this.countDocuments({
       ...filter,
@@ -257,7 +230,7 @@ export const addCommonStatics = (schema) => {
     });
   };
 
-  // Método para encontrar por ID solo si está activo
+  // Encontrar por ID solo si está activo
   schema.statics.findActiveById = function (id) {
     return this.findOne({
       _id: id,
@@ -265,7 +238,7 @@ export const addCommonStatics = (schema) => {
     });
   };
 
-  // Método para soft delete múltiples documentos
+  // Soft delete múltiples documentos
   schema.statics.softDeleteMany = function (filter, deletedBy, reason = null) {
     return this.updateMany(filter, {
       $set: {
@@ -280,7 +253,7 @@ export const addCommonStatics = (schema) => {
     });
   };
 
-  // Método para restaurar múltiples documentos
+  // Restaurar múltiples documentos
   schema.statics.restoreMany = function (filter, restoredBy, reason = null) {
     return this.updateMany(filter, {
       $set: {
@@ -299,50 +272,40 @@ export const addCommonStatics = (schema) => {
 
 /**
  * Query helpers para consultas comunes
- * @param {mongoose.Schema} schema - Esquema al que se aplican los helpers
  */
 export const addQueryHelpers = (schema) => {
-  // Helper para incluir solo documentos activos
   schema.query.active = function () {
     return this.where({
       $or: [{ isDeleted: false }, { isDeleted: { $exists: false } }],
     });
   };
 
-  // Helper para incluir solo documentos eliminados
   schema.query.deleted = function () {
     return this.where({ isDeleted: true });
   };
 
-  // Helper para ordenar por fecha de creación (más reciente primero)
   schema.query.newest = function () {
     return this.sort({ createdAt: -1 });
   };
 
-  // Helper para ordenar por fecha de creación (más antiguo primero)
   schema.query.oldest = function () {
     return this.sort({ createdAt: 1 });
   };
 
-  // Helper para filtrar por creador
   schema.query.byCreator = function (userId) {
     return this.where({ createdBy: userId });
   };
 
-  // Helper para filtrar por rango de fechas
   schema.query.createdBetween = function (startDate, endDate) {
     const filter = {};
     if (startDate) filter.$gte = startDate;
     if (endDate) filter.$lte = endDate;
-
     return this.where({ createdAt: filter });
   };
 };
 
 /**
  * Función principal para configurar un esquema con todas las funcionalidades base
- * @param {mongoose.Schema} schema - Esquema a configurar
- * @param {Object} options - Opciones de configuración
  */
 export const setupBaseSchema = (schema, options = {}) => {
   const {
@@ -355,12 +318,10 @@ export const setupBaseSchema = (schema, options = {}) => {
     addBaseFields = true,
   } = options;
 
-  // Agregar campos base si se especifica
   if (addBaseFields) {
-    schema.add(BaseSchemeFields);
+    schema.add(BaseSchemaFields);
   }
 
-  // Agregar funcionalidades
   if (addTimestamps) addTimestampMiddleware(schema);
   if (addIndexes) addCommonIndexes(schema);
   if (addVirtuals) addCommonVirtuals(schema);
@@ -372,12 +333,10 @@ export const setupBaseSchema = (schema, options = {}) => {
   schema.set("toJSON", {
     virtuals: true,
     transform: function (doc, ret) {
-      // Remover campos internos al serializar
       delete ret.__v;
       delete ret.deletedBy;
       delete ret.deletionReason;
 
-      // Si está eliminado, no mostrar contenido sensible
       if (ret.isDeleted) {
         delete ret.updatedBy;
         delete ret.lastChangeReason;
@@ -396,7 +355,6 @@ export const setupBaseSchema = (schema, options = {}) => {
  * Validadores comunes
  */
 export const CommonValidators = {
-  // Validador para ObjectId
   objectId: {
     validator: function (v) {
       return mongoose.Types.ObjectId.isValid(v);
@@ -404,7 +362,6 @@ export const CommonValidators = {
     message: "ID no válido",
   },
 
-  // Validador para email
   email: {
     validator: function (v) {
       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -412,7 +369,6 @@ export const CommonValidators = {
     message: "Email no válido",
   },
 
-  // Validador para URL
   url: {
     validator: function (v) {
       return !v || /^https?:\/\/.+/.test(v);
@@ -420,7 +376,6 @@ export const CommonValidators = {
     message: "URL no válida",
   },
 
-  // Validador para teléfono (formato internacional)
   phone: {
     validator: function (v) {
       return !v || /^\+?[1-9]\d{1,14}$/.test(v.replace(/\s/g, ""));
@@ -428,24 +383,23 @@ export const CommonValidators = {
     message: "Número de teléfono no válido",
   },
 
-  // Validador para coordenadas geográficas
   coordinates: {
     validator: function (coords) {
       return (
         coords &&
         coords.length === 2 &&
         coords[0] >= -180 &&
-        coords[0] <= 180 && // Longitude
+        coords[0] <= 180 &&
         coords[1] >= -90 &&
         coords[1] <= 90
-      ); // Latitude
+      );
     },
     message: "Coordenadas geográficas no válidas",
   },
 };
 
 export default {
-  BaseSchemeFields,
+  BaseSchemaFields,
   addTimestampMiddleware,
   addCommonIndexes,
   addCommonVirtuals,

@@ -4,7 +4,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
 import {
-  BaseSchemeFields,
+  BaseSchemaFields,
   setupBaseSchema,
   CommonValidators,
 } from "../../../modules/core/models/base.scheme.js";
@@ -442,7 +442,7 @@ const UserSchema = new mongoose.Schema({
     default: () => ({}),
   },
   // Campos base (auditoría, soft delete, etc.)
-  ...BaseSchemeFields,
+  ...BaseSchemaFields,
 });
 
 // Configurar el esquema con funcionalidades base
